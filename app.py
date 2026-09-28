@@ -1,4 +1,5 @@
-import os, time, secrets, hashlib, hmac, json, urllib.request, urllib.error
+import os, time, secrets, hashlib, hmac
+import resend
 from fastapi import FastAPI, Form, Request, Response
 from fastapi.responses import HTMLResponse, RedirectResponse
 
@@ -7,6 +8,7 @@ AUTHORIZED_EMAIL=os.environ.get("AUTHORIZED_EMAIL","").strip().lower()
 SESSION_SECRET=os.environ.get("SESSION_SECRET","")
 RESEND_API_KEY=os.environ.get("RESEND_API_KEY","").strip()
 RESEND_FROM_EMAIL=os.environ.get("RESEND_FROM_EMAIL","acesso@processos.portically.com.br").strip()
+resend.api_key=RESEND_API_KEY
 OTP_TTL=600
 SESSION_TTL=28800
 OTP_STORE={}
@@ -38,25 +40,13 @@ def valid_session(token):
 def send_otp(email,code):
     if not RESEND_API_KEY:
         raise RuntimeError("RESEND_API_KEY não configurada")
-    payload=json.dumps({
+    result=resend.Emails.send({
         "from": f"Portically Processos <{RESEND_FROM_EMAIL}>",
         "to": [email],
         "subject": "Código de acesso — Portically Processos",
         "text": f"Seu código de acesso ao Portically Processos é: {code}\n\nEle expira em 10 minutos e só pode ser usado uma vez."
-    }).encode("utf-8")
-    req=urllib.request.Request(
-        "https://api.resend.com/emails",
-        data=payload,
-        headers={"Authorization": f"Bearer {RESEND_API_KEY}", "Content-Type": "application/json"},
-        method="POST"
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=20) as resp:
-            if resp.status not in (200, 201):
-                raise RuntimeError(f"Resend HTTP {resp.status}")
-    except urllib.error.HTTPError as e:
-        detail=e.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"Resend HTTP {e.code}: {detail}") from e
+    })
+    return result
 
 @app.get("/health")
 def health():

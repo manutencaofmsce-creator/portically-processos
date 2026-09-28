@@ -1,4 +1,4 @@
-import os, time, secrets, hashlib, hmac, json, urllib.request
+import os, time, secrets, hashlib, hmac, json, urllib.request, urllib.error
 from fastapi import FastAPI, Form, Request, Response
 from fastapi.responses import HTMLResponse, RedirectResponse
 
@@ -50,9 +50,13 @@ def send_otp(email,code):
         headers={"Authorization": f"Bearer {RESEND_API_KEY}", "Content-Type": "application/json"},
         method="POST"
     )
-    with urllib.request.urlopen(req, timeout=20) as resp:
-        if resp.status not in (200, 201):
-            raise RuntimeError(f"Resend HTTP {resp.status}")
+    try:
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            if resp.status not in (200, 201):
+                raise RuntimeError(f"Resend HTTP {resp.status}")
+    except urllib.error.HTTPError as e:
+        detail=e.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"Resend HTTP {e.code}: {detail}") from e
 
 @app.get("/health")
 def health():

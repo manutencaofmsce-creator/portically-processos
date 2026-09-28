@@ -1,16 +1,12 @@
-import os, time, secrets, hashlib, hmac, smtplib
-from email.message import EmailMessage
+import os, time, secrets, hashlib, hmac, json, urllib.request
 from fastapi import FastAPI, Form, Request, Response
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 APP_VERSION="1.0.4"
 AUTHORIZED_EMAIL=os.environ.get("AUTHORIZED_EMAIL","").strip().lower()
 SESSION_SECRET=os.environ.get("SESSION_SECRET","")
-SMTP_HOST=os.environ.get("SMTP_HOST","")
-SMTP_PORT=int(os.environ.get("SMTP_PORT","587"))
-SMTP_USERNAME=os.environ.get("SMTP_USERNAME","")
-SMTP_PASSWORD=os.environ.get("SMTP_PASSWORD","")
-SMTP_FROM_EMAIL=os.environ.get("SMTP_FROM_EMAIL","") or SMTP_USERNAME
+RESEND_API_KEY=os.environ.get("RESEND_API_KEY","").strip()
+RESEND_FROM_EMAIL=os.environ.get("RESEND_FROM_EMAIL","acesso@processos.portically.com.br").strip()
 OTP_TTL=600
 SESSION_TTL=28800
 OTP_STORE={}
@@ -40,17 +36,23 @@ def valid_session(token):
         return False
 
 def send_otp(email,code):
-    if not (SMTP_HOST and SMTP_USERNAME and SMTP_PASSWORD and SMTP_FROM_EMAIL):
-        raise RuntimeError("SMTP não configurado")
-    msg=EmailMessage()
-    msg["Subject"]="Código de acesso — Portically Processos"
-    msg["From"]=SMTP_FROM_EMAIL
-    msg["To"]=email
-    msg.set_content(f"Seu código de acesso ao Portically Processos é: {code}\n\nEle expira em 10 minutos e só pode ser usado uma vez.")
-    with smtplib.SMTP(SMTP_HOST,SMTP_PORT,timeout=20) as s:
-        s.starttls()
-        s.login(SMTP_USERNAME,SMTP_PASSWORD)
-        s.send_message(msg)
+    if not RESEND_API_KEY:
+        raise RuntimeError("RESEND_API_KEY não configurada")
+    payload=json.dumps({
+        "from": f"Portically Processos <{RESEND_FROM_EMAIL}>",
+        "to": [email],
+        "subject": "Código de acesso — Portically Processos",
+        "text": f"Seu código de acesso ao Portically Processos é: {code}\n\nEle expira em 10 minutos e só pode ser usado uma vez."
+    }).encode("utf-8")
+    req=urllib.request.Request(
+        "https://api.resend.com/emails",
+        data=payload,
+        headers={"Authorization": f"Bearer {RESEND_API_KEY}", "Content-Type": "application/json"},
+        method="POST"
+    )
+    with urllib.request.urlopen(req, timeout=20) as resp:
+        if resp.status not in (200, 201):
+            raise RuntimeError(f"Resend HTTP {resp.status}")
 
 @app.get("/health")
 def health():
@@ -71,9 +73,10 @@ def solicitar(email:str=Form(...)):
     OTP_STORE[email]={"hash":hash_code(email,code),"exp":int(time.time())+OTP_TTL,"tries":0}
     try:
         send_otp(email,code)
-    except Exception:
+    except Exception as e:
+        print(f"ERRO_ENVIO_OTP: {type(e).__name__}: {e}", flush=True)
         OTP_STORE.pop(email,None)
-        return page("""<section class="card"><div class="brand">PORTICALLY HUB · PROCESSOS</div><h1>Envio ainda não configurado</h1><div class="err">A página está ativa, mas o serviço de envio do código por e-mail ainda precisa da credencial SMTP de produção.</div><p><a href="/">Voltar</a></p></section>""")
+        return page("""<section class="card"><div class="brand">PORTICALLY HUB · PROCESSOS</div><h1>Falha no envio do código</h1><div class="err">Não foi possível enviar o código de acesso. A configuração do serviço de e-mail precisa ser revisada.</div><p><a href="/">Voltar</a></p></section>""")
     return page(f"""<section class="card"><div class="brand">PORTICALLY HUB · PROCESSOS</div><h1>Digite o código</h1><p>Enviamos um código temporário para <strong>{email}</strong>.</p><form method="post" action="/validar-codigo"><input type="hidden" name="email" value="{email}"><label>Código de 6 dígitos</label><input name="code" inputmode="numeric" minlength="6" maxlength="6" required autocomplete="one-time-code"><button>Entrar no Portically Processos</button></form></section>""")
 
 @app.post("/validar-codigo")

@@ -6,8 +6,8 @@ from cryptography.fernet import Fernet
 from fastapi import FastAPI, Form, Request, Response
 from fastapi.responses import HTMLResponse, RedirectResponse, PlainTextResponse
 
-APP_VERSION="1.2.9"
-UPDATE_LABEL="Atualização 19 · V19"
+APP_VERSION="1.3.0"
+UPDATE_LABEL="Atualização 20 · V20"
 AUTHORIZED_EMAIL=os.environ.get("AUTHORIZED_EMAIL","").strip().lower()
 SESSION_SECRET=os.environ.get("SESSION_SECRET","")
 RESEND_API_KEY=os.environ.get("RESEND_API_KEY","").strip()
@@ -325,11 +325,28 @@ def mask_doc(kind,value):
 def db_ready():
     return bool(DATABASE_URL and DATA_ENCRYPTION_KEY and DATA_HMAC_KEY)
 
+def database_status():
+    if not db_ready():
+        return False, "not-linked"
+    try:
+        with db_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT 1")
+                cur.fetchone()
+                cur.execute("SELECT to_regclass('public.radar_items')")
+                table=cur.fetchone()[0]
+        return bool(table), "connected" if table else "table-missing"
+    except Exception as e:
+        print(f"DB_HEALTH_ERROR: {type(e).__name__}", flush=True)
+        return False, "connection-error"
+
 def db_conn():
     return psycopg.connect(DATABASE_URL, autocommit=True)
 
 def crypto_box():
-    return Fernet(DATA_ENCRYPTION_KEY.encode())
+    key=DATA_ENCRYPTION_KEY.strip()
+    key += "=" * ((4 - len(key) % 4) % 4)
+    return Fernet(key.encode())
 
 def doc_fingerprint(kind,value):
     return hmac.new(DATA_HMAC_KEY.encode(),normalize_document(kind,value).encode(),hashlib.sha256).hexdigest()
@@ -407,10 +424,16 @@ async def security_headers(request,call_next):
     return response
 
 def dashboard_counts():
-    try:
-        radar_count=len(list_radar_items())
-    except Exception:
-        radar_count=0
+    ok,_=database_status()
+    radar_count=0
+    if ok:
+        try:
+            with db_conn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT COUNT(*) FROM radar_items")
+                    radar_count=int(cur.fetchone()[0])
+        except Exception as e:
+            print(f"RADAR_COUNT_ERROR: {type(e).__name__}", flush=True)
     return {"processos":1,"cpf_cnpj":radar_count,"movimentacoes":0,"novos_processos":0,"alertas":0,"validacoes":1 if validation_status()[1] < 6 else 0}
 
 def tabs(active):
@@ -473,14 +496,24 @@ def tab_content(tab):
         return """<div class="grid"><div class="box"><div class="label">Autor / Exequente</div><div class="value">Francisco Fábio Dias da Silva</div></div><div class="box"><div class="label">Réu / Executado</div><div class="value">Portically Tecnologia Ltda. e outros</div></div><div class="box"><div class="label">Destinatária indicada no mandado</div><div class="value">Fernanda Geroncio Pinheiro Dantas</div></div></div>"""
     if tab=="historico":
         return f"""<div class="grid"><div class="box"><span class="chip green">ATUAL</span><div class="label" style="margin-top:8px">Versão</div><div class="value">v{APP_VERSION} · {UPDATE_LABEL}</div><p>Abas funcionais, documentos, movimentações, histórico e identificação visual permanente da versão atual.</p></div>
-<div class="box"><div class="label">Versão anterior</div><div class="value">v1.2.8 · Atualização 18 · V18</div><p>Agrupamento do caso e vínculo entre processo principal e carta precatória.</p></div></div>"""
+<div class="box"><div class="label">Versão anterior</div><div class="value">v1.2.9 · Atualização 19 · V19</div><p>Agrupamento do caso e vínculo entre processo principal e carta precatória.</p></div></div>"""
     return f"""<div class="notice"><b>Leitura rápida:</b> Processo em fase de execução. Há uma carta precatória vinculada no TRT-21, em Natal/RN, destinada ao cumprimento de citação originada no processo principal de Fortaleza/CE.</div>
 <div class="grid"><div class="box"><div class="label">Processo principal</div><div class="value cnj">{MAIN["cnj"]}</div></div><div class="box"><div class="label">Tribunal</div><div class="value">{MAIN["court"]}</div><p>{MAIN["unit"]}</p></div><div class="box"><div class="label">Fase</div><div class="value">{MAIN["phase"]}</div></div><div class="box"><div class="label">Sincronização</div><div class="value">{validation_status()[0]}</div><p>{validation_status()[1]} de 6 itens confirmados</p><a class="btn" href="/processos/{MAIN["cnj"]}?tab=validacao">Iniciar validação</a></div></div>
 <div class="section"><h2>Entenda este processo</h2><div class="grid"><div class="box"><h3>Execução</h3><p>Fase em que o Judiciário busca o cumprimento da obrigação ou pagamento indicado no processo.</p></div><div class="box"><h3>Por que há um processo em Natal?</h3><p>O processo principal tramita em Fortaleza/CE. A carta precatória foi aberta no TRT-21 para cumprir uma diligência em Natal/RN.</p></div><div class="box"><h3>Carta Precatória</h3><p>É o instrumento usado para pedir a outro juízo que cumpra uma diligência fora da área do processo principal.</p></div></div></div>"""
 
 @app.get("/health")
 def health():
-    return {"status":"ok","service":"portically-processos","version":APP_VERSION,"update":UPDATE_LABEL,"database":"connected" if db_ready() else "not-linked"}
+    ok,dbstate=database_status()
+    radar_count=None
+    if ok:
+        try:
+            with db_conn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT COUNT(*) FROM radar_items")
+                    radar_count=int(cur.fetchone()[0])
+        except Exception as e:
+            print(f"HEALTH_COUNT_ERROR: {type(e).__name__}", flush=True)
+    return {"status":"ok","service":"portically-processos","version":APP_VERSION,"update":UPDATE_LABEL,"database":dbstate,"radar_items":radar_count}
 
 @app.get("/",response_class=HTMLResponse)
 def login(request:Request):
@@ -534,7 +567,8 @@ def painel(request:Request):
 @app.get("/radar",response_class=HTMLResponse)
 def radar(request:Request,msg:str=""):
     if not auth(request): return RedirectResponse("/",303)
-    items=list_radar_items() if db_ready() else []
+    db_ok,db_state=database_status()
+    items=list_radar_items() if db_ok else []
     rows=""
     for item in items:
         rows+=f"""<div class="radar-row"><div><div class="value">{esc(item["nome"])}</div><div class="tiny">{item["tipo"]} · {esc(item["mascara"])}</div></div><div><div class="label">Frequência</div><div>{esc(item["frequencia"])}</div></div><div><div class="label">Alertas</div><div>{esc(item["canais"])}</div><div class="tiny">E-mail: {esc(item["email"])}</div><div class="tiny">WhatsApp: {esc(item["whatsapp"])}</div></div><div><span class="chip amber">{esc(item["status"])}</span></div><form method="post" action="/radar/{item["id"]}/excluir"><button class="danger" type="submit">Excluir</button></form></div>"""
@@ -543,7 +577,7 @@ def radar(request:Request,msg:str=""):
     notice=f'<div class="notice">{esc(msg)}</div>' if msg else ''
     body=f"""<section class="card">{app_header("Radar Processual","Cadastre CPF/CNPJ para acompanhar possíveis novos processos e alertas nas fontes compatíveis.")}
 {notice}
-{'' if db_ready() else '<div class="notice"><b>Banco seguro ainda não vinculado ao serviço.</b> O cadastro fica bloqueado para evitar armazenar CPF/CNPJ em memória temporária.</div>'}
+{'' if db_ok else '<div class="notice"><b>Banco seguro indisponível.</b> Estado: '+esc(db_state)+'. O cadastro fica bloqueado até a conexão ser restabelecida.</div>'}
 <div class="notice"><b>Como funciona:</b> o cadastro abaixo cria o alvo de monitoramento. A busca automática nas fontes oficiais será ativada conforme cada fonte permitir pesquisa por CPF/CNPJ. CAPTCHA, login e restrições não serão contornados.</div>
 <div class="proc"><h2>Novo monitoramento</h2>
 <form method="post" action="/radar/adicionar"><div class="form-grid">
@@ -574,8 +608,9 @@ def radar_adicionar(request:Request,tipo:str=Form(...),nome:str=Form(...),docume
         return RedirectResponse("/radar?msg=Informe um e-mail válido para ativar os alertas por e-mail.",303)
     if whatsapp_alerta and not valid_whatsapp(whatsapp_numero):
         return RedirectResponse("/radar?msg=Informe um número de WhatsApp válido para ativar os alertas.",303)
-    if not db_ready():
-        return RedirectResponse("/radar?msg=Banco seguro ainda não está vinculado ao serviço. O cadastro não foi gravado.",303)
+    db_ok,db_state=database_status()
+    if not db_ok:
+        return RedirectResponse(f"/radar?msg=Banco seguro indisponível ({db_state}). O cadastro não foi gravado.",303)
     item_id=secrets.token_hex(8)
     try:
         with db_conn() as conn:
@@ -589,9 +624,11 @@ def radar_adicionar(request:Request,tipo:str=Form(...),nome:str=Form(...),docume
                              encrypt_value(email_alerta_endereco) if email_alerta else None,
                              mask_email(email_alerta_endereco) if email_alerta else None))
         audit("CREATE","radar_item",item_id,f"{tipo} {mask_doc(tipo,numero)}")
-    except Exception:
-        return RedirectResponse("/radar?msg=Este documento já está cadastrado ou ocorreu uma falha segura no banco.",303)
-    return RedirectResponse("/radar?msg=Monitoramento cadastrado com criptografia e persistência.",303)
+    except Exception as e:
+        print(f"RADAR_CREATE_ERROR: {type(e).__name__}", flush=True)
+        return RedirectResponse("/radar?msg=Falha ao gravar o monitoramento. O erro foi registrado para diagnóstico.",303)
+    print(f"RADAR_CREATE_OK: {item_id}", flush=True)
+    return RedirectResponse("/radar?msg=Monitoramento cadastrado e gravado com sucesso.",303)
 
 @app.post("/radar/{item_id}/excluir")
 def radar_excluir(item_id:str,request:Request):

@@ -6,8 +6,8 @@ from cryptography.fernet import Fernet
 from fastapi import FastAPI, Form, Request, Response
 from fastapi.responses import HTMLResponse, RedirectResponse
 
-APP_VERSION="1.2.6"
-UPDATE_LABEL="Atualização 16 · V16"
+APP_VERSION="1.2.7"
+UPDATE_LABEL="Atualização 17 · V17"
 AUTHORIZED_EMAIL=os.environ.get("AUTHORIZED_EMAIL","").strip().lower()
 SESSION_SECRET=os.environ.get("SESSION_SECRET","")
 RESEND_API_KEY=os.environ.get("RESEND_API_KEY","").strip()
@@ -49,58 +49,145 @@ def page(body,title="Portically Processos"):
 .grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}}.dash{{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:14px;margin:20px 0}}.dash-card{{display:block;text-decoration:none;padding:18px;border-radius:16px;background:linear-gradient(180deg,#0b1d31,#081522);border:1px solid #254866;color:#e8eef7}}.dash-label{{font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:#8fa7bc}}.dash-num{{font-size:34px;font-weight:800;margin:8px 0 4px}}.dash-link{{font-size:13px;color:#77bdff}}.empty{{padding:24px;text-align:center;border:1px dashed #2b4e6c;border-radius:15px;background:#081522;color:#93a9be}}.box{{padding:16px;border-radius:14px;background:#091726;border:1px solid #1e3852}}.proc{{padding:20px;border-radius:16px;background:linear-gradient(180deg,#0a192a,#081522);border:1px solid #254561;box-shadow:inset 0 1px 0 #ffffff08}}.section{{margin-top:20px}}.case-title{{max-width:850px}}.case-sub{{margin:.2rem 0 0}}.case-footer{{display:flex;justify-content:space-between;gap:16px;align-items:end;flex-wrap:wrap;margin-top:16px;padding-top:16px;border-top:1px solid #183149}}.case-location{{margin:0;color:#86a7c5}}
 .label{{font-size:12px;color:#8fa5ba;text-transform:uppercase}}.value{{margin-top:6px;font-weight:700}}.cnj{{font-family:monospace;font-weight:700;word-break:break-word}}
 .notice{{padding:13px;border-radius:12px;background:#0b2136;border:1px solid #295374;color:#c4d9ec;margin-bottom:14px}}.timeline{{border-left:2px solid #2f5271;margin-left:8px;padding-left:20px}}.event{{margin:0 0 18px}}
-.link{{margin-left:8px;padding:12px 0 0 22px;border-left:2px solid #345c80;color:#a8bbce}}.deadline{{border-left:4px solid #ffc857}}.validate-card{{padding:18px;border:1px solid #2b4e6c;border-radius:15px;background:#091827;margin-bottom:12px}}.step{{display:grid;grid-template-columns:42px 1fr auto;gap:14px;align-items:start}}.stepn{{width:34px;height:34px;border-radius:50%;display:grid;place-items:center;background:#173c63;border:1px solid #2f6b9f;font-weight:700}}.checkrow{{display:flex;align-items:center;gap:8px;color:#dce9f5;font-weight:700;white-space:nowrap}}.checkrow input{{width:18px;height:18px;margin:0}}.help{{font-size:13px;color:#8fa7bc;margin-top:6px}}.progress{{height:9px;background:#07111f;border:1px solid #203a54;border-radius:999px;overflow:hidden;margin:10px 0}}.progress i{{display:block;height:100%;background:#2f9b5f}}.status-ok{{color:#9cf0b8}}.status-part{{color:#ffd77b}}.status-pend{{color:#9fb1c4}}textarea{{width:100%;min-height:88px;padding:12px;border-radius:10px;border:1px solid #36516d;background:#07111f;color:#fff;font-family:Arial,sans-serif}}select{{width:100%;padding:14px;border-radius:10px;border:1px solid #36516d;background:#07111f;color:#fff;font-size:16px}}.form-grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}}.radar-row{{display:grid;grid-template-columns:1.2fr .8fr .8fr .7fr auto;gap:12px;align-items:center;padding:14px 0;border-bottom:1px solid #173149}}.radar-row:last-child{{border-bottom:0}}.tiny{{font-size:12px;color:#8fa7bc}}.danger{{background:#5b2430!important}}
+.link{{margin-left:8px;padding:12px 0 0 22px;border-left:2px solid #345c80;color:#a8bbce}}.deadline{{border-left:4px solid #ffc857}}.validate-card{{padding:18px;border:1px solid #2b4e6c;border-radius:15px;background:#091827;margin-bottom:12px}}.step{{display:grid;grid-template-columns:42px 1fr auto;gap:14px;align-items:start}}.stepn{{width:34px;height:34px;border-radius:50%;display:grid;place-items:center;background:#173c63;border:1px solid #2f6b9f;font-weight:700}}.checkrow{{display:flex;align-items:center;gap:8px;color:#dce9f5;font-weight:700;white-space:nowrap}}.checkrow input{{width:18px;height:18px;margin:0}}.help{{font-size:13px;color:#8fa7bc;margin-top:6px}}.progress{{height:9px;background:#07111f;border:1px solid #203a54;border-radius:999px;overflow:hidden;margin:10px 0}}.progress i{{display:block;height:100%;background:#2f9b5f}}.status-ok{{color:#9cf0b8}}.status-part{{color:#ffd77b}}.status-pend{{color:#9fb1c4}}textarea{{width:100%;min-height:88px;padding:12px;border-radius:10px;border:1px solid #36516d;background:#07111f;color:#fff;font-family:Arial,sans-serif}}select{{width:100%;padding:14px;border-radius:10px;border:1px solid #36516d;background:#07111f;color:#fff;font-size:16px}}.form-grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}}.radar-row{{display:grid;grid-template-columns:1.2fr .8fr .8fr .7fr auto;gap:12px;align-items:center;padding:14px 0;border-bottom:1px solid #173149}}.radar-row:last-child{{border-bottom:0}}.tiny{{font-size:12px;color:#8fa7bc}}.mask-guide{{margin-top:7px;font-family:monospace;font-size:13px;color:#7fa9ca}}.field-error{{margin-top:7px;font-size:13px;color:#ff9aaa;font-weight:700}}.field-ok{{margin-top:7px;font-size:13px;color:#9cf0b8;font-weight:700}}.input-error{{border-color:#8e3f4d!important}}.input-ok{{border-color:#2e6942!important}}.danger{{background:#5b2430!important}}
 button,.btn{{display:inline-block;padding:12px 15px;border:0;border-radius:10px;background:#1f8cff;color:#fff;font-weight:700;text-decoration:none;cursor:pointer}}input{{width:100%;padding:14px;border-radius:10px;border:1px solid #36516d;background:#07111f;color:#fff;font-size:16px}}input[type="text"],input[type="search"],input[type="tel"],textarea{{text-transform:uppercase}}input[type="email"]{{text-transform:lowercase}}label{{display:block;margin:18px 0 8px}}
 .actions{{display:flex;gap:10px;flex-wrap:wrap;margin-top:18px}}.actions form{{margin:0}}.actions form button{{background:#213247}}a{{color:#7fc5ff}}
 .badge{{position:fixed;right:14px;bottom:14px;z-index:50;background:#0b1c2d;border:1px solid #315776;border-radius:11px;padding:8px 11px;box-shadow:0 10px 30px #0008;display:flex;align-items:center;gap:7px}}.badge b{{font-size:11px}}.badge span{{font-size:10px;color:#8ec8ff}}.badge small{{display:none}}
 @media(max-width:600px){{main{{padding:12px 12px 92px}}.card{{padding:16px}}h1{{font-size:24px}}}}
 </style>
 <script>
+function cpfDigits(v){{return v.replace(/\D/g,"").slice(0,11);}}
+function cnpjChars(v){{return v.toUpperCase().replace(/[^0-9A-Z]/g,"").slice(0,14);}}
 function formatCPF(value){{
-  const n=value.replace(/\D/g,"").slice(0,11);
+  const n=cpfDigits(value);
   return n.replace(/(\d{{3}})(\d)/,"$1.$2")
           .replace(/(\d{{3}})(\d)/,"$1.$2")
           .replace(/(\d{{3}})(\d{{1,2}})$/,"$1-$2");
 }}
 function formatCNPJ(value){{
-  const n=value.replace(/\D/g,"").slice(0,14);
-  return n.replace(/^(\d{{2}})(\d)/,"$1.$2")
-          .replace(/^(\d{{2}})\.(\d{{3}})(\d)/,"$1.$2.$3")
-          .replace(/\.(\d{{3}})(\d)/,".$1/$2")
-          .replace(/(\d{{4}})(\d{{1,2}})$/,"$1-$2");
+  const n=cnpjChars(value);
+  return n.replace(/^(.{{2}})(.)/,"$1.$2")
+          .replace(/^(.{{2}})\.(.{{3}})(.)/,"$1.$2.$3")
+          .replace(/\.(.{{3}})(.)/,".$1/$2")
+          .replace(/(.{{4}})(.{{1,2}})$/,"$1-$2");
+}}
+function validCPF(value){{
+  const n=cpfDigits(value);
+  if(n.length!==11 || /^(\d)\1{{10}}$/.test(n)) return false;
+  for(let size=9;size<=10;size++){{
+    let sum=0;
+    for(let i=0;i<size;i++) sum+=Number(n[i])*(size+1-i);
+    let d=(sum*10)%11;if(d===10)d=0;
+    if(d!==Number(n[size])) return false;
+  }}
+  return true;
+}}
+function cnpjValue(ch){{return ch.charCodeAt(0)-48;}}
+function calcCNPJ(base,weights){{
+  let sum=0;
+  for(let i=0;i<base.length;i++) sum+=cnpjValue(base[i])*weights[i];
+  const r=sum%11;
+  return String((r===0||r===1)?0:11-r);
+}}
+function validCNPJ(value){{
+  const n=cnpjChars(value);
+  if(!/^[0-9A-Z]{{12}}[0-9]{{2}}$/.test(n)) return false;
+  if(/^([0-9])\1{{13}}$/.test(n)) return false;
+  const d1=calcCNPJ(n.slice(0,12),[5,4,3,2,9,8,7,6,5,4,3,2]);
+  const d2=calcCNPJ(n.slice(0,12)+d1,[6,5,4,3,2,9,8,7,6,5,4,3,2]);
+  return n.slice(-2)===d1+d2;
 }}
 function updateDocumentoMask(){{
   const tipo=document.getElementById("radar_tipo");
   const doc=document.getElementById("radar_documento");
-  if(!tipo || !doc) return;
+  const guide=document.getElementById("radar_mask_guide");
+  const label=document.getElementById("radar_documento_label");
+  const status=document.getElementById("radar_documento_status");
+  if(!tipo||!doc||!guide||!label||!status) return;
+  doc.classList.remove("input-error","input-ok");
+  status.className="";
+  status.textContent="";
   if(tipo.value==="CNPJ"){{
+    label.textContent="CNPJ";
+    guide.textContent="FORMATO: XX.XXX.XXX/XXXX-XX";
     doc.placeholder="XX.XXX.XXX/XXXX-XX";
+    doc.inputMode="text";
     doc.maxLength=18;
     doc.value=formatCNPJ(doc.value);
-  }} else {{
+  }}else{{
+    label.textContent="CPF";
+    guide.textContent="FORMATO: XXX.XXX.XXX-XX";
     doc.placeholder="XXX.XXX.XXX-XX";
+    doc.inputMode="numeric";
     doc.maxLength=14;
     doc.value=formatCPF(doc.value);
   }}
+  validateDocumentoField(false);
+}}
+function validateDocumentoField(force){{
+  const tipo=document.getElementById("radar_tipo");
+  const doc=document.getElementById("radar_documento");
+  const status=document.getElementById("radar_documento_status");
+  const guide=document.getElementById("radar_mask_guide");
+  if(!tipo||!doc||!status||!guide) return true;
+  const raw=tipo.value==="CNPJ"?cnpjChars(doc.value):cpfDigits(doc.value);
+  const complete=raw.length===(tipo.value==="CNPJ"?14:11);
+  doc.classList.remove("input-error","input-ok");
+  status.className="";
+  status.textContent="";
+  guide.style.display=complete?"none":"block";
+  if(!complete){{
+    if(force && raw.length>0){{
+      status.className="field-error";
+      status.textContent=(tipo.value==="CNPJ"?"CNPJ":"CPF")+" INCOMPLETO.";
+      doc.classList.add("input-error");
+      return false;
+    }}
+    return false;
+  }}
+  const ok=tipo.value==="CNPJ"?validCNPJ(raw):validCPF(raw);
+  if(ok){{
+    status.className="field-ok";
+    status.textContent=(tipo.value==="CNPJ"?"CNPJ":"CPF")+" VÁLIDO.";
+    doc.classList.add("input-ok");
+    return true;
+  }}
+  status.className="field-error";
+  status.textContent=(tipo.value==="CNPJ"?"CNPJ":"CPF")+" INVÁLIDO. CONFIRA OS DÍGITOS INFORMADOS.";
+  doc.classList.add("input-error");
+  return false;
 }}
 document.addEventListener("change",function(e){{
-  if(e.target && e.target.id==="radar_tipo") updateDocumentoMask();
+  if(e.target&&e.target.id==="radar_tipo") updateDocumentoMask();
+}});
+document.addEventListener("blur",function(e){{
+  if(e.target&&e.target.id==="radar_documento") validateDocumentoField(true);
+}},true);
+document.addEventListener("submit",function(e){{
+  if(e.target&&e.target.action&&e.target.action.includes("/radar/adicionar")){{
+    if(!validateDocumentoField(true)){{
+      e.preventDefault();
+      const doc=document.getElementById("radar_documento");
+      if(doc) doc.focus();
+    }}
+  }}
 }});
 document.addEventListener("input",function(e){{
   const el=e.target;
   if(el.id==="radar_documento"){{
     const tipo=document.getElementById("radar_tipo");
-    el.value=(tipo && tipo.value==="CNPJ") ? formatCNPJ(el.value) : formatCPF(el.value);
+    el.value=(tipo&&tipo.value==="CNPJ")?formatCNPJ(el.value):formatCPF(el.value);
+    validateDocumentoField(false);
     return;
   }}
   if(el.matches('input[type="email"]')){{
-    const s=el.selectionStart, t=el.selectionEnd;
+    const s=el.selectionStart,t=el.selectionEnd;
     el.value=el.value.toLowerCase();
     try{{el.setSelectionRange(s,t)}}catch(_){{}}
     return;
   }}
   if(el.matches('input[type="text"],input[type="search"],input[type="tel"],textarea')){{
-    const s=el.selectionStart, t=el.selectionEnd;
+    const s=el.selectionStart,t=el.selectionEnd;
     el.value=el.value.toLocaleUpperCase("pt-BR");
     try{{el.setSelectionRange(s,t)}}catch(_){{}}
   }}
@@ -163,16 +250,27 @@ def valid_cpf(v):
         if d!=int(n[size]): return False
     return True
 
+def normalize_cnpj(v):
+    return "".join(ch for ch in str(v).upper() if ch.isalnum())
+
 def valid_cnpj(v):
-    n=only_digits(v)
-    if len(n)!=14 or n==n[0]*14: return False
+    n=normalize_cnpj(v)
+    if len(n)!=14 or not re.fullmatch(r"[0-9A-Z]{12}[0-9]{2}",n):
+        return False
+    if n.isdigit() and n==n[0]*14:
+        return False
+    def char_value(ch):
+        return ord(ch)-48
     def calc(base,weights):
-        s=sum(int(a)*b for a,b in zip(base,weights))
+        s=sum(char_value(a)*b for a,b in zip(base,weights))
         r=s%11
-        return "0" if r<2 else str(11-r)
+        return "0" if r in (0,1) else str(11-r)
     d1=calc(n[:12],[5,4,3,2,9,8,7,6,5,4,3,2])
     d2=calc(n[:12]+d1,[6,5,4,3,2,9,8,7,6,5,4,3,2])
     return n[-2:]==d1+d2
+
+def normalize_document(kind,value):
+    return only_digits(value) if kind=="CPF" else normalize_cnpj(value)
 
 def valid_email(value):
     v=str(value).strip().lower()
@@ -205,9 +303,12 @@ def encrypt_value(value):
     return crypto_box().encrypt(str(value).encode()).decode()
 
 def mask_doc(kind,value):
-    n=only_digits(value)
-    if kind=="CPF" and len(n)==11: return f"{n[:3]}.***.***-{n[-2:]}"
-    if kind=="CNPJ" and len(n)==14: return f"{n[:2]}.***.***/****-{n[-2:]}"
+    if kind=="CPF":
+        n=only_digits(value)
+        if len(n)==11: return f"{n[:3]}.***.***-{n[-2:]}"
+    if kind=="CNPJ":
+        n=normalize_cnpj(value)
+        if len(n)==14: return f"{n[:2]}.***.***/****-{n[-2:]}"
     return "Documento inválido"
 
 def db_ready():
@@ -219,11 +320,11 @@ def db_conn():
 def crypto_box():
     return Fernet(DATA_ENCRYPTION_KEY.encode())
 
-def doc_fingerprint(value):
-    return hmac.new(DATA_HMAC_KEY.encode(),only_digits(value).encode(),hashlib.sha256).hexdigest()
+def doc_fingerprint(kind,value):
+    return hmac.new(DATA_HMAC_KEY.encode(),normalize_document(kind,value).encode(),hashlib.sha256).hexdigest()
 
-def encrypt_doc(value):
-    return crypto_box().encrypt(only_digits(value).encode()).decode()
+def encrypt_doc(kind,value):
+    return crypto_box().encrypt(normalize_document(kind,value).encode()).decode()
 
 def init_db():
     if not db_ready(): return
@@ -361,7 +462,7 @@ def tab_content(tab):
         return """<div class="grid"><div class="box"><div class="label">Autor / Exequente</div><div class="value">Francisco Fábio Dias da Silva</div></div><div class="box"><div class="label">Réu / Executado</div><div class="value">Portically Tecnologia Ltda. e outros</div></div><div class="box"><div class="label">Destinatária indicada no mandado</div><div class="value">Fernanda Geroncio Pinheiro Dantas</div></div></div>"""
     if tab=="historico":
         return f"""<div class="grid"><div class="box"><span class="chip green">ATUAL</span><div class="label" style="margin-top:8px">Versão</div><div class="value">v{APP_VERSION} · {UPDATE_LABEL}</div><p>Abas funcionais, documentos, movimentações, histórico e identificação visual permanente da versão atual.</p></div>
-<div class="box"><div class="label">Versão anterior</div><div class="value">v1.2.5 · Atualização 15 · V15</div><p>Agrupamento do caso e vínculo entre processo principal e carta precatória.</p></div></div>"""
+<div class="box"><div class="label">Versão anterior</div><div class="value">v1.2.6 · Atualização 16 · V16</div><p>Agrupamento do caso e vínculo entre processo principal e carta precatória.</p></div></div>"""
     return f"""<div class="notice"><b>Leitura rápida:</b> Processo em fase de execução. Há uma carta precatória vinculada no TRT-21, em Natal/RN, destinada ao cumprimento de citação originada no processo principal de Fortaleza/CE.</div>
 <div class="grid"><div class="box"><div class="label">Processo principal</div><div class="value cnj">{MAIN["cnj"]}</div></div><div class="box"><div class="label">Tribunal</div><div class="value">{MAIN["court"]}</div><p>{MAIN["unit"]}</p></div><div class="box"><div class="label">Fase</div><div class="value">{MAIN["phase"]}</div></div><div class="box"><div class="label">Sincronização</div><div class="value">{validation_status()[0]}</div><p>{validation_status()[1]} de 6 itens confirmados</p><a class="btn" href="/processos/{MAIN["cnj"]}?tab=validacao">Iniciar validação</a></div></div>
 <div class="section"><h2>Entenda este processo</h2><div class="grid"><div class="box"><h3>Execução</h3><p>Fase em que o Judiciário busca o cumprimento da obrigação ou pagamento indicado no processo.</p></div><div class="box"><h3>Por que há um processo em Natal?</h3><p>O processo principal tramita em Fortaleza/CE. A carta precatória foi aberta no TRT-21 para cumprir uma diligência em Natal/RN.</p></div><div class="box"><h3>Carta Precatória</h3><p>É o instrumento usado para pedir a outro juízo que cumpra uma diligência fora da área do processo principal.</p></div></div></div>"""
@@ -437,7 +538,7 @@ def radar(request:Request,msg:str=""):
 <form method="post" action="/radar/adicionar"><div class="form-grid">
 <div><label>Tipo</label><select name="tipo" id="radar_tipo" required><option>CPF</option><option>CNPJ</option></select></div>
 <div><label>Nome / Razão social</label><input name="nome" required placeholder="Identificação do titular"></div>
-<div><label>CPF/CNPJ</label><input name="documento" id="radar_documento" required inputmode="numeric" maxlength="18" placeholder="XXX.XXX.XXX-XX"><div class="tiny">A máscara muda automaticamente conforme CPF ou CNPJ.</div></div>
+<div><label id="radar_documento_label">CPF</label><input name="documento" id="radar_documento" required inputmode="numeric" maxlength="14" placeholder="XXX.XXX.XXX-XX" autocomplete="off"><div class="mask-guide" id="radar_mask_guide">FORMATO: XXX.XXX.XXX-XX</div><div id="radar_documento_status"></div></div>
 <div><label>Frequência</label><select name="frequencia"><option>Diária</option><option>Semanal</option><option>Manual</option></select></div>
 </div>
 <div class="form-grid">
@@ -454,7 +555,7 @@ def radar_adicionar(request:Request,tipo:str=Form(...),nome:str=Form(...),docume
     tipo=tipo.strip().upper()
     nome=nome.strip().upper()
     email_alerta_endereco=email_alerta_endereco.strip().lower()
-    numero=only_digits(documento)
+    numero=normalize_document(tipo,documento)
     ok=(tipo=="CPF" and valid_cpf(numero)) or (tipo=="CNPJ" and valid_cnpj(numero))
     if not ok:
         return RedirectResponse("/radar?msg=CPF/CNPJ inválido. Confira os números e tente novamente.",303)
@@ -470,7 +571,7 @@ def radar_adicionar(request:Request,tipo:str=Form(...),nome:str=Form(...),docume
             with conn.cursor() as cur:
                 cur.execute("""INSERT INTO radar_items(id,tipo,nome,doc_cipher,doc_hash,mascara,frequencia,email_alerta,whatsapp_alerta,status,whatsapp_cipher,whatsapp_mask,email_cipher,email_mask)
                                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
-                            (item_id,tipo,nome,encrypt_doc(numero),doc_fingerprint(numero),mask_doc(tipo,numero),frequencia,
+                            (item_id,tipo,nome,encrypt_doc(tipo,numero),doc_fingerprint(tipo,numero),mask_doc(tipo,numero),frequencia,
                              bool(email_alerta),bool(whatsapp_alerta),"Aguardando integração",
                              encrypt_value(normalize_whatsapp(whatsapp_numero)) if whatsapp_alerta else None,
                              mask_whatsapp(whatsapp_numero) if whatsapp_alerta else None,

@@ -6,8 +6,8 @@ from cryptography.fernet import Fernet
 from fastapi import FastAPI, Form, Request, Response
 from fastapi.responses import HTMLResponse, RedirectResponse
 
-APP_VERSION="1.2.5"
-UPDATE_LABEL="Atualização 15 · V15"
+APP_VERSION="1.2.6"
+UPDATE_LABEL="Atualização 16 · V16"
 AUTHORIZED_EMAIL=os.environ.get("AUTHORIZED_EMAIL","").strip().lower()
 SESSION_SECRET=os.environ.get("SESSION_SECRET","")
 RESEND_API_KEY=os.environ.get("RESEND_API_KEY","").strip()
@@ -56,8 +56,43 @@ button,.btn{{display:inline-block;padding:12px 15px;border:0;border-radius:10px;
 @media(max-width:600px){{main{{padding:12px 12px 92px}}.card{{padding:16px}}h1{{font-size:24px}}}}
 </style>
 <script>
+function formatCPF(value){{
+  const n=value.replace(/\D/g,"").slice(0,11);
+  return n.replace(/(\d{{3}})(\d)/,"$1.$2")
+          .replace(/(\d{{3}})(\d)/,"$1.$2")
+          .replace(/(\d{{3}})(\d{{1,2}})$/,"$1-$2");
+}}
+function formatCNPJ(value){{
+  const n=value.replace(/\D/g,"").slice(0,14);
+  return n.replace(/^(\d{{2}})(\d)/,"$1.$2")
+          .replace(/^(\d{{2}})\.(\d{{3}})(\d)/,"$1.$2.$3")
+          .replace(/\.(\d{{3}})(\d)/,".$1/$2")
+          .replace(/(\d{{4}})(\d{{1,2}})$/,"$1-$2");
+}}
+function updateDocumentoMask(){{
+  const tipo=document.getElementById("radar_tipo");
+  const doc=document.getElementById("radar_documento");
+  if(!tipo || !doc) return;
+  if(tipo.value==="CNPJ"){{
+    doc.placeholder="XX.XXX.XXX/XXXX-XX";
+    doc.maxLength=18;
+    doc.value=formatCNPJ(doc.value);
+  }} else {{
+    doc.placeholder="XXX.XXX.XXX-XX";
+    doc.maxLength=14;
+    doc.value=formatCPF(doc.value);
+  }}
+}}
+document.addEventListener("change",function(e){{
+  if(e.target && e.target.id==="radar_tipo") updateDocumentoMask();
+}});
 document.addEventListener("input",function(e){{
   const el=e.target;
+  if(el.id==="radar_documento"){{
+    const tipo=document.getElementById("radar_tipo");
+    el.value=(tipo && tipo.value==="CNPJ") ? formatCNPJ(el.value) : formatCPF(el.value);
+    return;
+  }}
   if(el.matches('input[type="email"]')){{
     const s=el.selectionStart, t=el.selectionEnd;
     el.value=el.value.toLowerCase();
@@ -70,6 +105,7 @@ document.addEventListener("input",function(e){{
     try{{el.setSelectionRange(s,t)}}catch(_){{}}
   }}
 }});
+setTimeout(updateDocumentoMask,0);
 </script></head><body>
 <div class="badge"><b>v{APP_VERSION}</b><span>{UPDATE_LABEL}</span></div>
 <main><div class="wrap">{body}</div></main></body></html>""")
@@ -325,7 +361,7 @@ def tab_content(tab):
         return """<div class="grid"><div class="box"><div class="label">Autor / Exequente</div><div class="value">Francisco Fábio Dias da Silva</div></div><div class="box"><div class="label">Réu / Executado</div><div class="value">Portically Tecnologia Ltda. e outros</div></div><div class="box"><div class="label">Destinatária indicada no mandado</div><div class="value">Fernanda Geroncio Pinheiro Dantas</div></div></div>"""
     if tab=="historico":
         return f"""<div class="grid"><div class="box"><span class="chip green">ATUAL</span><div class="label" style="margin-top:8px">Versão</div><div class="value">v{APP_VERSION} · {UPDATE_LABEL}</div><p>Abas funcionais, documentos, movimentações, histórico e identificação visual permanente da versão atual.</p></div>
-<div class="box"><div class="label">Versão anterior</div><div class="value">v1.2.4 · Atualização 14 · V14</div><p>Agrupamento do caso e vínculo entre processo principal e carta precatória.</p></div></div>"""
+<div class="box"><div class="label">Versão anterior</div><div class="value">v1.2.5 · Atualização 15 · V15</div><p>Agrupamento do caso e vínculo entre processo principal e carta precatória.</p></div></div>"""
     return f"""<div class="notice"><b>Leitura rápida:</b> Processo em fase de execução. Há uma carta precatória vinculada no TRT-21, em Natal/RN, destinada ao cumprimento de citação originada no processo principal de Fortaleza/CE.</div>
 <div class="grid"><div class="box"><div class="label">Processo principal</div><div class="value cnj">{MAIN["cnj"]}</div></div><div class="box"><div class="label">Tribunal</div><div class="value">{MAIN["court"]}</div><p>{MAIN["unit"]}</p></div><div class="box"><div class="label">Fase</div><div class="value">{MAIN["phase"]}</div></div><div class="box"><div class="label">Sincronização</div><div class="value">{validation_status()[0]}</div><p>{validation_status()[1]} de 6 itens confirmados</p><a class="btn" href="/processos/{MAIN["cnj"]}?tab=validacao">Iniciar validação</a></div></div>
 <div class="section"><h2>Entenda este processo</h2><div class="grid"><div class="box"><h3>Execução</h3><p>Fase em que o Judiciário busca o cumprimento da obrigação ou pagamento indicado no processo.</p></div><div class="box"><h3>Por que há um processo em Natal?</h3><p>O processo principal tramita em Fortaleza/CE. A carta precatória foi aberta no TRT-21 para cumprir uma diligência em Natal/RN.</p></div><div class="box"><h3>Carta Precatória</h3><p>É o instrumento usado para pedir a outro juízo que cumpra uma diligência fora da área do processo principal.</p></div></div></div>"""
@@ -399,9 +435,9 @@ def radar(request:Request,msg:str=""):
 <div class="notice"><b>Como funciona:</b> o cadastro abaixo cria o alvo de monitoramento. A busca automática nas fontes oficiais será ativada conforme cada fonte permitir pesquisa por CPF/CNPJ. CAPTCHA, login e restrições não serão contornados.</div>
 <div class="proc"><h2>Novo monitoramento</h2>
 <form method="post" action="/radar/adicionar"><div class="form-grid">
-<div><label>Tipo</label><select name="tipo" required><option>CPF</option><option>CNPJ</option></select></div>
+<div><label>Tipo</label><select name="tipo" id="radar_tipo" required><option>CPF</option><option>CNPJ</option></select></div>
 <div><label>Nome / Razão social</label><input name="nome" required placeholder="Identificação do titular"></div>
-<div><label>CPF/CNPJ</label><input name="documento" required inputmode="numeric" placeholder="Somente números ou formatado"></div>
+<div><label>CPF/CNPJ</label><input name="documento" id="radar_documento" required inputmode="numeric" maxlength="18" placeholder="XXX.XXX.XXX-XX"><div class="tiny">A máscara muda automaticamente conforme CPF ou CNPJ.</div></div>
 <div><label>Frequência</label><select name="frequencia"><option>Diária</option><option>Semanal</option><option>Manual</option></select></div>
 </div>
 <div class="form-grid">

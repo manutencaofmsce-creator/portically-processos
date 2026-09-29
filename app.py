@@ -1,4 +1,4 @@
-import os, time, secrets, hashlib, hmac, html
+import os, time, secrets, hashlib, hmac, html, re
 from datetime import datetime, timezone, timedelta
 import resend
 import psycopg
@@ -6,8 +6,8 @@ from cryptography.fernet import Fernet
 from fastapi import FastAPI, Form, Request, Response
 from fastapi.responses import HTMLResponse, RedirectResponse
 
-APP_VERSION="1.2.4"
-UPDATE_LABEL="Atualização 14 · V14"
+APP_VERSION="1.2.5"
+UPDATE_LABEL="Atualização 15 · V15"
 AUTHORIZED_EMAIL=os.environ.get("AUTHORIZED_EMAIL","").strip().lower()
 SESSION_SECRET=os.environ.get("SESSION_SECRET","")
 RESEND_API_KEY=os.environ.get("RESEND_API_KEY","").strip()
@@ -50,11 +50,27 @@ def page(body,title="Portically Processos"):
 .label{{font-size:12px;color:#8fa5ba;text-transform:uppercase}}.value{{margin-top:6px;font-weight:700}}.cnj{{font-family:monospace;font-weight:700;word-break:break-word}}
 .notice{{padding:13px;border-radius:12px;background:#0b2136;border:1px solid #295374;color:#c4d9ec;margin-bottom:14px}}.timeline{{border-left:2px solid #2f5271;margin-left:8px;padding-left:20px}}.event{{margin:0 0 18px}}
 .link{{margin-left:8px;padding:12px 0 0 22px;border-left:2px solid #345c80;color:#a8bbce}}.deadline{{border-left:4px solid #ffc857}}.validate-card{{padding:18px;border:1px solid #2b4e6c;border-radius:15px;background:#091827;margin-bottom:12px}}.step{{display:grid;grid-template-columns:42px 1fr auto;gap:14px;align-items:start}}.stepn{{width:34px;height:34px;border-radius:50%;display:grid;place-items:center;background:#173c63;border:1px solid #2f6b9f;font-weight:700}}.checkrow{{display:flex;align-items:center;gap:8px;color:#dce9f5;font-weight:700;white-space:nowrap}}.checkrow input{{width:18px;height:18px;margin:0}}.help{{font-size:13px;color:#8fa7bc;margin-top:6px}}.progress{{height:9px;background:#07111f;border:1px solid #203a54;border-radius:999px;overflow:hidden;margin:10px 0}}.progress i{{display:block;height:100%;background:#2f9b5f}}.status-ok{{color:#9cf0b8}}.status-part{{color:#ffd77b}}.status-pend{{color:#9fb1c4}}textarea{{width:100%;min-height:88px;padding:12px;border-radius:10px;border:1px solid #36516d;background:#07111f;color:#fff;font-family:Arial,sans-serif}}select{{width:100%;padding:14px;border-radius:10px;border:1px solid #36516d;background:#07111f;color:#fff;font-size:16px}}.form-grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}}.radar-row{{display:grid;grid-template-columns:1.2fr .8fr .8fr .7fr auto;gap:12px;align-items:center;padding:14px 0;border-bottom:1px solid #173149}}.radar-row:last-child{{border-bottom:0}}.tiny{{font-size:12px;color:#8fa7bc}}.danger{{background:#5b2430!important}}
-button,.btn{{display:inline-block;padding:12px 15px;border:0;border-radius:10px;background:#1f8cff;color:#fff;font-weight:700;text-decoration:none;cursor:pointer}}input{{width:100%;padding:14px;border-radius:10px;border:1px solid #36516d;background:#07111f;color:#fff;font-size:16px}}label{{display:block;margin:18px 0 8px}}
+button,.btn{{display:inline-block;padding:12px 15px;border:0;border-radius:10px;background:#1f8cff;color:#fff;font-weight:700;text-decoration:none;cursor:pointer}}input{{width:100%;padding:14px;border-radius:10px;border:1px solid #36516d;background:#07111f;color:#fff;font-size:16px}}input[type="text"],input[type="search"],input[type="tel"],textarea{{text-transform:uppercase}}input[type="email"]{{text-transform:lowercase}}label{{display:block;margin:18px 0 8px}}
 .actions{{display:flex;gap:10px;flex-wrap:wrap;margin-top:18px}}.actions form{{margin:0}}.actions form button{{background:#213247}}a{{color:#7fc5ff}}
 .badge{{position:fixed;right:14px;bottom:14px;z-index:50;background:#0b1c2d;border:1px solid #315776;border-radius:11px;padding:8px 11px;box-shadow:0 10px 30px #0008;display:flex;align-items:center;gap:7px}}.badge b{{font-size:11px}}.badge span{{font-size:10px;color:#8ec8ff}}.badge small{{display:none}}
 @media(max-width:600px){{main{{padding:12px 12px 92px}}.card{{padding:16px}}h1{{font-size:24px}}}}
-</style></head><body>
+</style>
+<script>
+document.addEventListener("input",function(e){
+  const el=e.target;
+  if(el.matches('input[type="email"]')){
+    const s=el.selectionStart, t=el.selectionEnd;
+    el.value=el.value.toLowerCase();
+    try{el.setSelectionRange(s,t)}catch(_){}
+    return;
+  }
+  if(el.matches('input[type="text"],input[type="search"],input[type="tel"],textarea')){
+    const s=el.selectionStart, t=el.selectionEnd;
+    el.value=el.value.toLocaleUpperCase("pt-BR");
+    try{el.setSelectionRange(s,t)}catch(_){}
+  }
+});
+</script></head><body>
 <div class="badge"><b>v{APP_VERSION}</b><span>{UPDATE_LABEL}</span></div>
 <main><div class="wrap">{body}</div></main></body></html>""")
 
@@ -122,6 +138,17 @@ def valid_cnpj(v):
     d2=calc(n[:12]+d1,[6,5,4,3,2,9,8,7,6,5,4,3,2])
     return n[-2:]==d1+d2
 
+def valid_email(value):
+    v=str(value).strip().lower()
+    return bool(re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+",v))
+
+def mask_email(value):
+    v=str(value).strip().lower()
+    if "@" not in v: return "—"
+    local,domain=v.split("@",1)
+    visible=local[:2] if len(local)>=2 else local[:1]
+    return f"{visible}***@{domain}"
+
 def valid_whatsapp(value):
     n=only_digits(value)
     return 10 <= len(n) <= 13
@@ -182,6 +209,8 @@ def init_db():
             )""")
             cur.execute("ALTER TABLE radar_items ADD COLUMN IF NOT EXISTS whatsapp_cipher TEXT")
             cur.execute("ALTER TABLE radar_items ADD COLUMN IF NOT EXISTS whatsapp_mask TEXT")
+            cur.execute("ALTER TABLE radar_items ADD COLUMN IF NOT EXISTS email_cipher TEXT")
+            cur.execute("ALTER TABLE radar_items ADD COLUMN IF NOT EXISTS email_mask TEXT")
             cur.execute("""CREATE TABLE IF NOT EXISTS audit_log(
                 id BIGSERIAL PRIMARY KEY,
                 action TEXT NOT NULL,
@@ -202,7 +231,7 @@ def list_radar_items():
     if not db_ready(): return []
     with db_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute("""SELECT id,tipo,nome,mascara,frequencia,email_alerta,whatsapp_alerta,status,created_at,whatsapp_mask
+            cur.execute("""SELECT id,tipo,nome,mascara,frequencia,email_alerta,whatsapp_alerta,status,created_at,whatsapp_mask,email_mask
                            FROM radar_items ORDER BY created_at DESC""")
             rows=cur.fetchall()
     items=[]
@@ -211,7 +240,7 @@ def list_radar_items():
         if r[5]: canais.append("E-mail")
         if r[6]: canais.append("WhatsApp")
         items.append({"id":r[0],"tipo":r[1],"nome":r[2],"mascara":r[3],"frequencia":r[4],
-                      "canais":", ".join(canais) if canais else "Somente sistema","status":r[7],"created_at":r[8],"whatsapp":r[9] or "—"})
+                      "canais":", ".join(canais) if canais else "Somente sistema","status":r[7],"created_at":r[8],"whatsapp":r[9] or "—","email":r[10] or "—"})
     return items
 
 @app.on_event("startup")
@@ -296,7 +325,7 @@ def tab_content(tab):
         return """<div class="grid"><div class="box"><div class="label">Autor / Exequente</div><div class="value">Francisco Fábio Dias da Silva</div></div><div class="box"><div class="label">Réu / Executado</div><div class="value">Portically Tecnologia Ltda. e outros</div></div><div class="box"><div class="label">Destinatária indicada no mandado</div><div class="value">Fernanda Geroncio Pinheiro Dantas</div></div></div>"""
     if tab=="historico":
         return f"""<div class="grid"><div class="box"><span class="chip green">ATUAL</span><div class="label" style="margin-top:8px">Versão</div><div class="value">v{APP_VERSION} · {UPDATE_LABEL}</div><p>Abas funcionais, documentos, movimentações, histórico e identificação visual permanente da versão atual.</p></div>
-<div class="box"><div class="label">Versão anterior</div><div class="value">v1.2.3 · Atualização 13 · V13</div><p>Agrupamento do caso e vínculo entre processo principal e carta precatória.</p></div></div>"""
+<div class="box"><div class="label">Versão anterior</div><div class="value">v1.2.4 · Atualização 14 · V14</div><p>Agrupamento do caso e vínculo entre processo principal e carta precatória.</p></div></div>"""
     return f"""<div class="notice"><b>Leitura rápida:</b> Processo em fase de execução. Há uma carta precatória vinculada no TRT-21, em Natal/RN, destinada ao cumprimento de citação originada no processo principal de Fortaleza/CE.</div>
 <div class="grid"><div class="box"><div class="label">Processo principal</div><div class="value cnj">{MAIN["cnj"]}</div></div><div class="box"><div class="label">Tribunal</div><div class="value">{MAIN["court"]}</div><p>{MAIN["unit"]}</p></div><div class="box"><div class="label">Fase</div><div class="value">{MAIN["phase"]}</div></div><div class="box"><div class="label">Sincronização</div><div class="value">{validation_status()[0]}</div><p>{validation_status()[1]} de 6 itens confirmados</p><a class="btn" href="/processos/{MAIN["cnj"]}?tab=validacao">Iniciar validação</a></div></div>
 <div class="section"><h2>Entenda este processo</h2><div class="grid"><div class="box"><h3>Execução</h3><p>Fase em que o Judiciário busca o cumprimento da obrigação ou pagamento indicado no processo.</p></div><div class="box"><h3>Por que há um processo em Natal?</h3><p>O processo principal tramita em Fortaleza/CE. A carta precatória foi aberta no TRT-21 para cumprir uma diligência em Natal/RN.</p></div><div class="box"><h3>Carta Precatória</h3><p>É o instrumento usado para pedir a outro juízo que cumpra uma diligência fora da área do processo principal.</p></div></div></div>"""
@@ -360,7 +389,7 @@ def radar(request:Request,msg:str=""):
     items=list_radar_items() if db_ready() else []
     rows=""
     for item in items:
-        rows+=f"""<div class="radar-row"><div><div class="value">{esc(item["nome"])}</div><div class="tiny">{item["tipo"]} · {esc(item["mascara"])}</div></div><div><div class="label">Frequência</div><div>{esc(item["frequencia"])}</div></div><div><div class="label">Alertas</div><div>{esc(item["canais"])}</div><div class="tiny">{esc(item["whatsapp"])}</div></div><div><span class="chip amber">{esc(item["status"])}</span></div><form method="post" action="/radar/{item["id"]}/excluir"><button class="danger" type="submit">Excluir</button></form></div>"""
+        rows+=f"""<div class="radar-row"><div><div class="value">{esc(item["nome"])}</div><div class="tiny">{item["tipo"]} · {esc(item["mascara"])}</div></div><div><div class="label">Frequência</div><div>{esc(item["frequencia"])}</div></div><div><div class="label">Alertas</div><div>{esc(item["canais"])}</div><div class="tiny">E-mail: {esc(item["email"])}</div><div class="tiny">WhatsApp: {esc(item["whatsapp"])}</div></div><div><span class="chip amber">{esc(item["status"])}</span></div><form method="post" action="/radar/{item["id"]}/excluir"><button class="danger" type="submit">Excluir</button></form></div>"""
     if not rows:
         rows='<div class="empty">Nenhum CPF ou CNPJ cadastrado.</div>'
     notice=f'<div class="notice">{esc(msg)}</div>' if msg else ''
@@ -376,7 +405,7 @@ def radar(request:Request,msg:str=""):
 <div><label>Frequência</label><select name="frequencia"><option>Diária</option><option>Semanal</option><option>Manual</option></select></div>
 </div>
 <div class="form-grid">
-<div><label><input type="checkbox" name="email_alerta" value="1" style="width:auto"> Avisar por e-mail</label></div>
+<div><label><input type="checkbox" name="email_alerta" value="1" style="width:auto"> Avisar por e-mail</label><input type="email" name="email_alerta_endereco" autocomplete="email" placeholder="exemplo@dominio.com"><div class="tiny">O e-mail será convertido automaticamente para letras minúsculas e armazenado criptografado.</div></div>
 <div><label><input type="checkbox" name="whatsapp_alerta" value="1" style="width:auto"> Avisar por WhatsApp</label><input name="whatsapp_numero" inputmode="tel" placeholder="Ex.: 84 99999-9999"><div class="tiny">Informe o número que receberá os alertas. Será armazenado criptografado.</div></div>
 </div><button type="submit">Adicionar ao Radar</button></form></div>
 <div class="section"><h2>Monitorados · {len(items)}</h2><div class="proc">{rows}</div></div>
@@ -384,13 +413,17 @@ def radar(request:Request,msg:str=""):
     return page(body,"Radar Processual")
 
 @app.post("/radar/adicionar")
-def radar_adicionar(request:Request,tipo:str=Form(...),nome:str=Form(...),documento:str=Form(...),frequencia:str=Form("Diária"),email_alerta:str=Form(None),whatsapp_alerta:str=Form(None),whatsapp_numero:str=Form("")):
+def radar_adicionar(request:Request,tipo:str=Form(...),nome:str=Form(...),documento:str=Form(...),frequencia:str=Form("Diária"),email_alerta:str=Form(None),email_alerta_endereco:str=Form(""),whatsapp_alerta:str=Form(None),whatsapp_numero:str=Form("")):
     if not auth(request): return RedirectResponse("/",303)
     tipo=tipo.strip().upper()
+    nome=nome.strip().upper()
+    email_alerta_endereco=email_alerta_endereco.strip().lower()
     numero=only_digits(documento)
     ok=(tipo=="CPF" and valid_cpf(numero)) or (tipo=="CNPJ" and valid_cnpj(numero))
     if not ok:
         return RedirectResponse("/radar?msg=CPF/CNPJ inválido. Confira os números e tente novamente.",303)
+    if email_alerta and not valid_email(email_alerta_endereco):
+        return RedirectResponse("/radar?msg=Informe um e-mail válido para ativar os alertas por e-mail.",303)
     if whatsapp_alerta and not valid_whatsapp(whatsapp_numero):
         return RedirectResponse("/radar?msg=Informe um número de WhatsApp válido para ativar os alertas.",303)
     if not db_ready():
@@ -399,12 +432,14 @@ def radar_adicionar(request:Request,tipo:str=Form(...),nome:str=Form(...),docume
     try:
         with db_conn() as conn:
             with conn.cursor() as cur:
-                cur.execute("""INSERT INTO radar_items(id,tipo,nome,doc_cipher,doc_hash,mascara,frequencia,email_alerta,whatsapp_alerta,status,whatsapp_cipher,whatsapp_mask)
-                               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
-                            (item_id,tipo,nome.strip(),encrypt_doc(numero),doc_fingerprint(numero),mask_doc(tipo,numero),frequencia,
+                cur.execute("""INSERT INTO radar_items(id,tipo,nome,doc_cipher,doc_hash,mascara,frequencia,email_alerta,whatsapp_alerta,status,whatsapp_cipher,whatsapp_mask,email_cipher,email_mask)
+                               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                            (item_id,tipo,nome,encrypt_doc(numero),doc_fingerprint(numero),mask_doc(tipo,numero),frequencia,
                              bool(email_alerta),bool(whatsapp_alerta),"Aguardando integração",
                              encrypt_value(normalize_whatsapp(whatsapp_numero)) if whatsapp_alerta else None,
-                             mask_whatsapp(whatsapp_numero) if whatsapp_alerta else None))
+                             mask_whatsapp(whatsapp_numero) if whatsapp_alerta else None,
+                             encrypt_value(email_alerta_endereco) if email_alerta else None,
+                             mask_email(email_alerta_endereco) if email_alerta else None))
         audit("CREATE","radar_item",item_id,f"{tipo} {mask_doc(tipo,numero)}")
     except Exception:
         return RedirectResponse("/radar?msg=Este documento já está cadastrado ou ocorreu uma falha segura no banco.",303)
@@ -471,7 +506,7 @@ def salvar_validacao(cnj:str,request:Request,
     VALIDATION["documento"]=bool(documento)
     VALIDATION["data_ciencia"]=data_ciencia.strip()
     VALIDATION["prazo"]=bool(prazo) and bool(data_ciencia.strip())
-    VALIDATION["observacoes"]=observacoes.strip()
+    VALIDATION["observacoes"]=observacoes.strip().upper()
     now=datetime.now(timezone(timedelta(hours=-3)))
     VALIDATION["validated_at"]=now.strftime("%d/%m/%Y às %H:%M")
     VALIDATION["validated_by"]=AUTHORIZED_EMAIL

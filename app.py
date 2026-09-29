@@ -4,18 +4,20 @@ import resend
 from fastapi import FastAPI, Form, Request, Response
 from fastapi.responses import HTMLResponse, RedirectResponse
 
-APP_VERSION="1.2.1"
-UPDATE_LABEL="Atualização 11 · V11"
+APP_VERSION="1.2.2"
+UPDATE_LABEL="Atualização 12 · V12"
 AUTHORIZED_EMAIL=os.environ.get("AUTHORIZED_EMAIL","").strip().lower()
 SESSION_SECRET=os.environ.get("SESSION_SECRET","")
 RESEND_API_KEY=os.environ.get("RESEND_API_KEY","").strip()
 RESEND_FROM_EMAIL=os.environ.get("RESEND_FROM_EMAIL","acesso@processos.portically.com.br").strip()
+DATABASE_URL=os.environ.get("DATABASE_URL","").strip()
+DATA_ENCRYPTION_KEY=os.environ.get("DATA_ENCRYPTION_KEY","").strip()
+DATA_HMAC_KEY=os.environ.get("DATA_HMAC_KEY","").strip()
 resend.api_key=RESEND_API_KEY
 OTP_TTL=600
 SESSION_TTL=28800
 OTP_STORE={}
 VALIDATION={"cnj":False,"tribunal":False,"partes":False,"vinculo":False,"documento":False,"prazo":False,"data_ciencia":"","observacoes":"","validated_at":"","validated_by":""}
-RADAR_ITEMS=[]
 
 app=FastAPI(title="Portically Processos",docs_url=None,redoc_url=None)
 
@@ -114,8 +116,92 @@ def mask_doc(kind,value):
     if kind=="CNPJ" and len(n)==14: return f"{n[:2]}.***.***/****-{n[-2:]}"
     return "Documento inválido"
 
+def db_ready():
+    return bool(DATABASE_URL and DATA_ENCRYPTION_KEY and DATA_HMAC_KEY)
+
+def db_conn():
+    return psycopg.connect(DATABASE_URL, autocommit=True)
+
+def crypto_box():
+    return Fernet(DATA_ENCRYPTION_KEY.encode())
+
+def doc_fingerprint(value):
+    return hmac.new(DATA_HMAC_KEY.encode(),only_digits(value).encode(),hashlib.sha256).hexdigest()
+
+def encrypt_doc(value):
+    return crypto_box().encrypt(only_digits(value).encode()).decode()
+
+def init_db():
+    if not db_ready(): return
+    with db_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""CREATE TABLE IF NOT EXISTS radar_items(
+                id TEXT PRIMARY KEY,
+                tipo TEXT NOT NULL CHECK (tipo IN ('CPF','CNPJ')),
+                nome TEXT NOT NULL,
+                doc_cipher TEXT NOT NULL,
+                doc_hash TEXT NOT NULL UNIQUE,
+                mascara TEXT NOT NULL,
+                frequencia TEXT NOT NULL,
+                email_alerta BOOLEAN NOT NULL DEFAULT FALSE,
+                whatsapp_alerta BOOLEAN NOT NULL DEFAULT FALSE,
+                status TEXT NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )""")
+            cur.execute("""CREATE TABLE IF NOT EXISTS audit_log(
+                id BIGSERIAL PRIMARY KEY,
+                action TEXT NOT NULL,
+                entity_type TEXT NOT NULL,
+                entity_id TEXT,
+                details TEXT,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )""")
+
+def audit(action,entity_type,entity_id="",details=""):
+    if not db_ready(): return
+    with db_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("INSERT INTO audit_log(action,entity_type,entity_id,details) VALUES (%s,%s,%s,%s)",
+                        (action,entity_type,entity_id,details[:1000]))
+
+def list_radar_items():
+    if not db_ready(): return []
+    with db_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""SELECT id,tipo,nome,mascara,frequencia,email_alerta,whatsapp_alerta,status,created_at
+                           FROM radar_items ORDER BY created_at DESC""")
+            rows=cur.fetchall()
+    items=[]
+    for r in rows:
+        canais=[]
+        if r[5]: canais.append("E-mail")
+        if r[6]: canais.append("WhatsApp")
+        items.append({"id":r[0],"tipo":r[1],"nome":r[2],"mascara":r[3],"frequencia":r[4],
+                      "canais":", ".join(canais) if canais else "Somente sistema","status":r[7],"created_at":r[8]})
+    return items
+
+@app.on_event("startup")
+def startup():
+    init_db()
+
+@app.middleware("http")
+async def security_headers(request,call_next):
+    response=await call_next(request)
+    response.headers["X-Content-Type-Options"]="nosniff"
+    response.headers["X-Frame-Options"]="DENY"
+    response.headers["Referrer-Policy"]="no-referrer"
+    response.headers["Permissions-Policy"]="camera=(), microphone=(), geolocation=()"
+    response.headers["Cache-Control"]="no-store, max-age=0"
+    response.headers["Content-Security-Policy"]="default-src 'self'; style-src 'self' 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'self'"
+    return response
+
 def dashboard_counts():
-    return {"processos":1,"cpf_cnpj":len(RADAR_ITEMS),"movimentacoes":0,"novos_processos":0,"alertas":0,"validacoes":1 if validation_status()[1] < 6 else 0}
+    try:
+        radar_count=len(list_radar_items())
+    except Exception:
+        radar_count=0
+    return {"processos":1,"cpf_cnpj":radar_count,"movimentacoes":0,"novos_processos":0,"alertas":0,"validacoes":1 if validation_status()[1] < 6 else 0}
 
 def tabs(active):
     items=[("resumo","Resumo"),("movimentacoes","Movimentações"),("documentos","Documentos"),
@@ -177,14 +263,14 @@ def tab_content(tab):
         return """<div class="grid"><div class="box"><div class="label">Autor / Exequente</div><div class="value">Francisco Fábio Dias da Silva</div></div><div class="box"><div class="label">Réu / Executado</div><div class="value">Portically Tecnologia Ltda. e outros</div></div><div class="box"><div class="label">Destinatária indicada no mandado</div><div class="value">Fernanda Geroncio Pinheiro Dantas</div></div></div>"""
     if tab=="historico":
         return f"""<div class="grid"><div class="box"><span class="chip green">ATUAL</span><div class="label" style="margin-top:8px">Versão</div><div class="value">v{APP_VERSION} · {UPDATE_LABEL}</div><p>Abas funcionais, documentos, movimentações, histórico e identificação visual permanente da versão atual.</p></div>
-<div class="box"><div class="label">Versão anterior</div><div class="value">v1.2.0 · Atualização 10 · V10</div><p>Agrupamento do caso e vínculo entre processo principal e carta precatória.</p></div></div>"""
+<div class="box"><div class="label">Versão anterior</div><div class="value">v1.2.1 · Atualização 11 · V11</div><p>Agrupamento do caso e vínculo entre processo principal e carta precatória.</p></div></div>"""
     return f"""<div class="notice"><b>Leitura rápida:</b> Processo em fase de execução. Há uma carta precatória vinculada no TRT-21, em Natal/RN, destinada ao cumprimento de citação originada no processo principal de Fortaleza/CE.</div>
 <div class="grid"><div class="box"><div class="label">Processo principal</div><div class="value cnj">{MAIN["cnj"]}</div></div><div class="box"><div class="label">Tribunal</div><div class="value">{MAIN["court"]}</div><p>{MAIN["unit"]}</p></div><div class="box"><div class="label">Fase</div><div class="value">{MAIN["phase"]}</div></div><div class="box"><div class="label">Sincronização</div><div class="value">{validation_status()[0]}</div><p>{validation_status()[1]} de 6 itens confirmados</p><a class="btn" href="/processos/{MAIN["cnj"]}?tab=validacao">Iniciar validação</a></div></div>
 <div class="section"><h2>Entenda este processo</h2><div class="grid"><div class="box"><h3>Execução</h3><p>Fase em que o Judiciário busca o cumprimento da obrigação ou pagamento indicado no processo.</p></div><div class="box"><h3>Por que há um processo em Natal?</h3><p>O processo principal tramita em Fortaleza/CE. A carta precatória foi aberta no TRT-21 para cumprir uma diligência em Natal/RN.</p></div><div class="box"><h3>Carta Precatória</h3><p>É o instrumento usado para pedir a outro juízo que cumpra uma diligência fora da área do processo principal.</p></div></div></div>"""
 
 @app.get("/health")
 def health():
-    return {"status":"ok","service":"portically-processos","version":APP_VERSION,"update":UPDATE_LABEL}
+    return {"status":"ok","service":"portically-processos","version":APP_VERSION,"update":UPDATE_LABEL,"database":"connected" if db_ready() else "not-linked"}
 
 @app.get("/",response_class=HTMLResponse)
 def login(request:Request):
@@ -238,14 +324,16 @@ def painel(request:Request):
 @app.get("/radar",response_class=HTMLResponse)
 def radar(request:Request,msg:str=""):
     if not auth(request): return RedirectResponse("/",303)
+    items=list_radar_items() if db_ready() else []
     rows=""
-    for item in RADAR_ITEMS:
+    for item in items:
         rows+=f"""<div class="radar-row"><div><div class="value">{esc(item["nome"])}</div><div class="tiny">{item["tipo"]} · {esc(item["mascara"])}</div></div><div><div class="label">Frequência</div><div>{esc(item["frequencia"])}</div></div><div><div class="label">Alertas</div><div>{esc(item["canais"])}</div></div><div><span class="chip amber">{esc(item["status"])}</span></div><form method="post" action="/radar/{item["id"]}/excluir"><button class="danger" type="submit">Excluir</button></form></div>"""
     if not rows:
         rows='<div class="empty">Nenhum CPF ou CNPJ cadastrado.</div>'
     notice=f'<div class="notice">{esc(msg)}</div>' if msg else ''
     body=f"""<section class="card">{app_header("Radar Processual","Cadastre CPF/CNPJ para acompanhar possíveis novos processos e alertas nas fontes compatíveis.")}
 {notice}
+{'' if db_ready() else '<div class="notice"><b>Banco seguro ainda não vinculado ao serviço.</b> O cadastro fica bloqueado para evitar armazenar CPF/CNPJ em memória temporária.</div>'}
 <div class="notice"><b>Como funciona:</b> o cadastro abaixo cria o alvo de monitoramento. A busca automática nas fontes oficiais será ativada conforme cada fonte permitir pesquisa por CPF/CNPJ. CAPTCHA, login e restrições não serão contornados.</div>
 <div class="proc"><h2>Novo monitoramento</h2>
 <form method="post" action="/radar/adicionar"><div class="form-grid">
@@ -257,8 +345,8 @@ def radar(request:Request,msg:str=""):
 <div class="form-grid">
 <div><label><input type="checkbox" name="email_alerta" value="1" style="width:auto"> Avisar por e-mail</label></div>
 <div><label><input type="checkbox" name="whatsapp_alerta" value="1" style="width:auto"> Avisar por WhatsApp</label></div>
-</div><button type="submit">Adicionar ao Radar</button></form></div>
-<div class="section"><h2>Monitorados · {len(RADAR_ITEMS)}</h2><div class="proc">{rows}</div></div>
+</div><button type="submit" {'disabled' if not db_ready() else ''}>Adicionar ao Radar</button></form></div>
+<div class="section"><h2>Monitorados · {len(items)}</h2><div class="proc">{rows}</div></div>
 <div class="actions"><a class="btn" href="/painel">Voltar ao painel</a></div></section>"""
     return page(body,"Radar Processual")
 
@@ -270,19 +358,31 @@ def radar_adicionar(request:Request,tipo:str=Form(...),nome:str=Form(...),docume
     ok=(tipo=="CPF" and valid_cpf(numero)) or (tipo=="CNPJ" and valid_cnpj(numero))
     if not ok:
         return RedirectResponse("/radar?msg=CPF/CNPJ inválido. Confira os números e tente novamente.",303)
-    if any(x["tipo"]==tipo and x["numero"]==numero for x in RADAR_ITEMS):
-        return RedirectResponse("/radar?msg=Este documento já está cadastrado no Radar.",303)
-    canais=[]
-    if email_alerta: canais.append("E-mail")
-    if whatsapp_alerta: canais.append("WhatsApp")
-    RADAR_ITEMS.append({"id":secrets.token_hex(4),"tipo":tipo,"nome":nome.strip(),"numero":numero,"mascara":mask_doc(tipo,numero),"frequencia":frequencia,"canais":", ".join(canais) if canais else "Somente sistema","status":"Aguardando integração","created_at":datetime.now(timezone(timedelta(hours=-3))).strftime("%d/%m/%Y %H:%M")})
-    return RedirectResponse("/radar?msg=Monitoramento cadastrado com sucesso.",303)
+    if not db_ready():
+        return RedirectResponse("/radar?msg=Banco seguro ainda não está vinculado ao serviço.",303)
+    item_id=secrets.token_hex(8)
+    try:
+        with db_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""INSERT INTO radar_items(id,tipo,nome,doc_cipher,doc_hash,mascara,frequencia,email_alerta,whatsapp_alerta,status)
+                               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                            (item_id,tipo,nome.strip(),encrypt_doc(numero),doc_fingerprint(numero),mask_doc(tipo,numero),frequencia,
+                             bool(email_alerta),bool(whatsapp_alerta),"Aguardando integração"))
+        audit("CREATE","radar_item",item_id,f"{tipo} {mask_doc(tipo,numero)}")
+    except Exception:
+        return RedirectResponse("/radar?msg=Este documento já está cadastrado ou ocorreu uma falha segura no banco.",303)
+    return RedirectResponse("/radar?msg=Monitoramento cadastrado com criptografia e persistência.",303)
 
 @app.post("/radar/{item_id}/excluir")
 def radar_excluir(item_id:str,request:Request):
     if not auth(request): return RedirectResponse("/",303)
-    RADAR_ITEMS[:]=[x for x in RADAR_ITEMS if x["id"]!=item_id]
-    return RedirectResponse("/radar?msg=Monitoramento removido.",303)
+    if not db_ready():
+        return RedirectResponse("/radar?msg=Banco seguro indisponível.",303)
+    with db_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM radar_items WHERE id=%s",(item_id,))
+    audit("DELETE","radar_item",item_id,"Monitoramento removido")
+    return RedirectResponse("/radar?msg=Monitoramento removido do banco.",303)
 
 @app.get("/movimentacoes",response_class=HTMLResponse)
 def movimentacoes_central(request:Request):

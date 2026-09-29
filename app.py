@@ -56,20 +56,20 @@ button,.btn{{display:inline-block;padding:12px 15px;border:0;border-radius:10px;
 @media(max-width:600px){{main{{padding:12px 12px 92px}}.card{{padding:16px}}h1{{font-size:24px}}}}
 </style>
 <script>
-document.addEventListener("input",function(e){
+document.addEventListener("input",function(e){{
   const el=e.target;
-  if(el.matches('input[type="email"]')){
+  if(el.matches('input[type="email"]')){{
     const s=el.selectionStart, t=el.selectionEnd;
     el.value=el.value.toLowerCase();
-    try{el.setSelectionRange(s,t)}catch(_){}
+    try{{el.setSelectionRange(s,t)}}catch(_){{}}
     return;
-  }
-  if(el.matches('input[type="text"],input[type="search"],input[type="tel"],textarea')){
+  }}
+  if(el.matches('input[type="text"],input[type="search"],input[type="tel"],textarea')){{
     const s=el.selectionStart, t=el.selectionEnd;
     el.value=el.value.toLocaleUpperCase("pt-BR");
-    try{el.setSelectionRange(s,t)}catch(_){}
-  }
-});
+    try{{el.setSelectionRange(s,t)}}catch(_){{}}
+  }}
+}});
 </script></head><body>
 <div class="badge"><b>v{APP_VERSION}</b><span>{UPDATE_LABEL}</span></div>
 <main><div class="wrap">{body}</div></main></body></html>""")

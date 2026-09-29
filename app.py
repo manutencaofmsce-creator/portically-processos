@@ -4,8 +4,8 @@ import resend
 from fastapi import FastAPI, Form, Request, Response
 from fastapi.responses import HTMLResponse, RedirectResponse
 
-APP_VERSION="1.1.3"
-UPDATE_LABEL="Atualização 09 · V9"
+APP_VERSION="1.2.0"
+UPDATE_LABEL="Atualização 10 · V10"
 AUTHORIZED_EMAIL=os.environ.get("AUTHORIZED_EMAIL","").strip().lower()
 SESSION_SECRET=os.environ.get("SESSION_SECRET","")
 RESEND_API_KEY=os.environ.get("RESEND_API_KEY","").strip()
@@ -41,7 +41,7 @@ def page(body,title="Portically Processos"):
 .brand{{font-size:12px;letter-spacing:.16em;color:#72bfff;font-weight:700}}.top{{display:flex;justify-content:space-between;gap:18px;align-items:flex-start;flex-wrap:wrap}}.chips{{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}}.header-meta{{display:flex;align-items:center;gap:8px;flex-wrap:wrap}}.version-inline{{font-size:12px;color:#9db0c3;background:#081522;border:1px solid #28445f;border-radius:999px;padding:7px 10px;white-space:nowrap}}
 .chip{{display:inline-block;padding:6px 9px;border:1px solid #31516f;border-radius:999px;font-size:12px;color:#c9dbec;background:#0b1a2b}}.green{{border-color:#2e6942;color:#9cf0b8}}.amber{{border-color:#705d2a;color:#ffd77b}}
 .tabs{{display:flex;gap:8px;overflow:auto;margin:18px 0}}.tab{{white-space:nowrap;padding:10px 12px;border-radius:9px;background:#0a1626;border:1px solid #223955;color:#c4d4e3;text-decoration:none;font-size:13px}}.tab.active{{background:#173c63;color:#fff}}
-.grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}}.box{{padding:16px;border-radius:14px;background:#091726;border:1px solid #1e3852}}.proc{{padding:20px;border-radius:16px;background:linear-gradient(180deg,#0a192a,#081522);border:1px solid #254561;box-shadow:inset 0 1px 0 #ffffff08}}.section{{margin-top:20px}}.case-title{{max-width:850px}}.case-sub{{margin:.2rem 0 0}}.case-footer{{display:flex;justify-content:space-between;gap:16px;align-items:end;flex-wrap:wrap;margin-top:16px;padding-top:16px;border-top:1px solid #183149}}.case-location{{margin:0;color:#86a7c5}}
+.grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}}.dash{{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:14px;margin:20px 0}}.dash-card{{display:block;text-decoration:none;padding:18px;border-radius:16px;background:linear-gradient(180deg,#0b1d31,#081522);border:1px solid #254866;color:#e8eef7}}.dash-label{{font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:#8fa7bc}}.dash-num{{font-size:34px;font-weight:800;margin:8px 0 4px}}.dash-link{{font-size:13px;color:#77bdff}}.empty{{padding:24px;text-align:center;border:1px dashed #2b4e6c;border-radius:15px;background:#081522;color:#93a9be}}.box{{padding:16px;border-radius:14px;background:#091726;border:1px solid #1e3852}}.proc{{padding:20px;border-radius:16px;background:linear-gradient(180deg,#0a192a,#081522);border:1px solid #254561;box-shadow:inset 0 1px 0 #ffffff08}}.section{{margin-top:20px}}.case-title{{max-width:850px}}.case-sub{{margin:.2rem 0 0}}.case-footer{{display:flex;justify-content:space-between;gap:16px;align-items:end;flex-wrap:wrap;margin-top:16px;padding-top:16px;border-top:1px solid #183149}}.case-location{{margin:0;color:#86a7c5}}
 .label{{font-size:12px;color:#8fa5ba;text-transform:uppercase}}.value{{margin-top:6px;font-weight:700}}.cnj{{font-family:monospace;font-weight:700;word-break:break-word}}
 .notice{{padding:13px;border-radius:12px;background:#0b2136;border:1px solid #295374;color:#c4d9ec;margin-bottom:14px}}.timeline{{border-left:2px solid #2f5271;margin-left:8px;padding-left:20px}}.event{{margin:0 0 18px}}
 .link{{margin-left:8px;padding:12px 0 0 22px;border-left:2px solid #345c80;color:#a8bbce}}.deadline{{border-left:4px solid #ffc857}}.validate-card{{padding:18px;border:1px solid #2b4e6c;border-radius:15px;background:#091827;margin-bottom:12px}}.step{{display:grid;grid-template-columns:42px 1fr auto;gap:14px;align-items:start}}.stepn{{width:34px;height:34px;border-radius:50%;display:grid;place-items:center;background:#173c63;border:1px solid #2f6b9f;font-weight:700}}.checkrow{{display:flex;align-items:center;gap:8px;color:#dce9f5;font-weight:700;white-space:nowrap}}.checkrow input{{width:18px;height:18px;margin:0}}.help{{font-size:13px;color:#8fa7bc;margin-top:6px}}.progress{{height:9px;background:#07111f;border:1px solid #203a54;border-radius:999px;overflow:hidden;margin:10px 0}}.progress i{{display:block;height:100%;background:#2f9b5f}}.status-ok{{color:#9cf0b8}}.status-part{{color:#ffd77b}}.status-pend{{color:#9fb1c4}}textarea{{width:100%;min-height:88px;padding:12px;border-radius:10px;border:1px solid #36516d;background:#07111f;color:#fff;font-family:Arial,sans-serif}}
@@ -78,6 +78,13 @@ def send_otp(email,code):
       "text":f"Seu código de acesso ao Portically Processos é: {code}\n\nEle expira em 10 minutos e só pode ser usado uma vez."})
 
 def auth(request): return valid_session(request.cookies.get("portically_processos_session",""))
+
+def app_header(title,subtitle=""):
+    sub=f'<p class="case-sub">{esc(subtitle)}</p>' if subtitle else ""
+    return f"""<div class="top"><div><div class="brand">PORTICALLY HUB · PROCESSOS</div><h1>{esc(title)}</h1>{sub}</div><div class="header-meta"><span class="version-inline">v{APP_VERSION}</span><span class="version-inline">{UPDATE_LABEL}</span></div></div>"""
+
+def dashboard_counts():
+    return {"processos":1,"cpf_cnpj":0,"movimentacoes":0,"novos_processos":0,"alertas":0,"validacoes":1 if validation_status()[1] < 6 else 0}
 
 def tabs(active):
     items=[("resumo","Resumo"),("movimentacoes","Movimentações"),("documentos","Documentos"),
@@ -139,7 +146,7 @@ def tab_content(tab):
         return """<div class="grid"><div class="box"><div class="label">Autor / Exequente</div><div class="value">Francisco Fábio Dias da Silva</div></div><div class="box"><div class="label">Réu / Executado</div><div class="value">Portically Tecnologia Ltda. e outros</div></div><div class="box"><div class="label">Destinatária indicada no mandado</div><div class="value">Fernanda Geroncio Pinheiro Dantas</div></div></div>"""
     if tab=="historico":
         return f"""<div class="grid"><div class="box"><span class="chip green">ATUAL</span><div class="label" style="margin-top:8px">Versão</div><div class="value">v{APP_VERSION} · {UPDATE_LABEL}</div><p>Abas funcionais, documentos, movimentações, histórico e identificação visual permanente da versão atual.</p></div>
-<div class="box"><div class="label">Versão anterior</div><div class="value">v1.1.2 · Atualização 08 · V8</div><p>Agrupamento do caso e vínculo entre processo principal e carta precatória.</p></div></div>"""
+<div class="box"><div class="label">Versão anterior</div><div class="value">v1.1.3 · Atualização 09 · V9</div><p>Agrupamento do caso e vínculo entre processo principal e carta precatória.</p></div></div>"""
     return f"""<div class="notice"><b>Leitura rápida:</b> Processo em fase de execução. Há uma carta precatória vinculada no TRT-21, em Natal/RN, destinada ao cumprimento de citação originada no processo principal de Fortaleza/CE.</div>
 <div class="grid"><div class="box"><div class="label">Processo principal</div><div class="value cnj">{MAIN["cnj"]}</div></div><div class="box"><div class="label">Tribunal</div><div class="value">{MAIN["court"]}</div><p>{MAIN["unit"]}</p></div><div class="box"><div class="label">Fase</div><div class="value">{MAIN["phase"]}</div></div><div class="box"><div class="label">Sincronização</div><div class="value">{validation_status()[0]}</div><p>{validation_status()[1]} de 6 itens confirmados</p><a class="btn" href="/processos/{MAIN["cnj"]}?tab=validacao">Iniciar validação</a></div></div>
 <div class="section"><h2>Entenda este processo</h2><div class="grid"><div class="box"><h3>Execução</h3><p>Fase em que o Judiciário busca o cumprimento da obrigação ou pagamento indicado no processo.</p></div><div class="box"><h3>Por que há um processo em Natal?</h3><p>O processo principal tramita em Fortaleza/CE. A carta precatória foi aberta no TRT-21 para cumprir uma diligência em Natal/RN.</p></div><div class="box"><h3>Carta Precatória</h3><p>É o instrumento usado para pedir a outro juízo que cumpra uma diligência fora da área do processo principal.</p></div></div></div>"""
@@ -150,7 +157,7 @@ def health():
 
 @app.get("/",response_class=HTMLResponse)
 def login(request:Request):
-    if auth(request): return RedirectResponse("/processos",303)
+    if auth(request): return RedirectResponse("/painel",303)
     return page(f"""<section class="card"><div class="brand">PORTICALLY HUB · MÓDULO PROCESSOS</div><h1>Acesso protegido</h1><div class="chips"><span class="chip green">v{APP_VERSION}</span><span class="chip">{UPDATE_LABEL}</span></div><p>Informe o e-mail autorizado. Um código temporário será enviado antes de liberar os dados processuais.</p><form method="post" action="/solicitar-codigo"><label>E-mail</label><input name="email" type="email" required autocomplete="email"><button>Enviar código de acesso</button></form></section>""")
 
 @app.post("/solicitar-codigo",response_class=HTMLResponse)
@@ -175,9 +182,47 @@ def validar(response:Response,email:str=Form(...),code:str=Form(...)):
     if not hmac.compare_digest(rec["hash"],hash_code(email,code.strip())):
         return page('<section class="card"><h1>Código inválido</h1><a href="/">Tentar novamente</a></section>')
     OTP_STORE.pop(email,None)
-    r=RedirectResponse("/processos",303)
+    r=RedirectResponse("/painel",303)
     r.set_cookie("portically_processos_session",make_session(email),httponly=True,secure=True,samesite="strict",max_age=SESSION_TTL)
     return r
+
+@app.get("/painel",response_class=HTMLResponse)
+def painel(request:Request):
+    if not auth(request): return RedirectResponse("/",303)
+    n=dashboard_counts()
+    status,done,css=validation_status()
+    body=f"""<section class="card">{app_header("Painel","Acesse rapidamente processos, cadastros, movimentações, alertas e validações.")}
+<div class="dash">
+<a class="dash-card" href="/processos"><div class="dash-label">Processos monitorados</div><div class="dash-num">{n["processos"]}</div><div class="dash-link">Ver processos →</div></a>
+<a class="dash-card" href="/radar"><div class="dash-label">CPF/CNPJ monitorados</div><div class="dash-num">{n["cpf_cnpj"]}</div><div class="dash-link">Abrir Radar →</div></a>
+<a class="dash-card" href="/movimentacoes"><div class="dash-label">Novas movimentações</div><div class="dash-num">{n["movimentacoes"]}</div><div class="dash-link">Analisar →</div></a>
+<a class="dash-card" href="/novos-processos"><div class="dash-label">Novos processos</div><div class="dash-num">{n["novos_processos"]}</div><div class="dash-link">Ver encontrados →</div></a>
+<a class="dash-card" href="/alertas"><div class="dash-label">Alertas</div><div class="dash-num">{n["alertas"]}</div><div class="dash-link">Ver alertas →</div></a>
+<a class="dash-card" href="/processos/{MAIN["cnj"]}?tab=validacao"><div class="dash-label">Validações pendentes</div><div class="dash-num">{n["validacoes"]}</div><div class="dash-link">Continuar validação →</div></a>
+</div>
+<div class="section"><h2>Resumo atual</h2><div class="grid"><div class="box"><div class="label">Caso em acompanhamento</div><div class="value">{TITLE}</div><p class="cnj">{MAIN["cnj"]}</p></div><div class="box"><div class="label">Status da validação</div><div class="value {css}">{status}</div><p>{done} de 6 itens confirmados</p></div><div class="box"><div class="label">Radar processual</div><div class="value">Ainda não configurado</div><p>Cadastre CPF/CNPJ para preparar a busca de novos processos nas fontes compatíveis.</p></div></div></div>
+<div class="actions"><form method="post" action="/sair"><button>Sair</button></form></div></section>"""
+    return page(body,"Painel · Portically Processos")
+
+@app.get("/radar",response_class=HTMLResponse)
+def radar(request:Request):
+    if not auth(request): return RedirectResponse("/",303)
+    return page(f"""<section class="card">{app_header("Radar Processual","Cadastros de CPF/CNPJ acompanhados pelo sistema.")}<div class="notice">Área preparada para integração com fontes oficiais que permitam pesquisa por CPF/CNPJ.</div><div class="empty">Nenhum CPF ou CNPJ cadastrado.</div><div class="actions"><a class="btn" href="/painel">Voltar ao painel</a></div></section>""","Radar Processual")
+
+@app.get("/movimentacoes",response_class=HTMLResponse)
+def movimentacoes_central(request:Request):
+    if not auth(request): return RedirectResponse("/",303)
+    return page(f"""<section class="card">{app_header("Novas movimentações","Itens novos detectados e ainda não analisados.")}<div class="empty">Nenhuma nova movimentação detectada automaticamente.</div><div class="section"><a class="btn" href="/processos/{MAIN["cnj"]}?tab=movimentacoes">Ver movimentações já catalogadas</a></div><div class="actions"><a class="btn" href="/painel">Voltar ao painel</a></div></section>""","Novas movimentações")
+
+@app.get("/novos-processos",response_class=HTMLResponse)
+def novos_processos(request:Request):
+    if not auth(request): return RedirectResponse("/",303)
+    return page(f"""<section class="card">{app_header("Novos processos encontrados","Resultados aguardando confirmação antes de entrar na base.")}<div class="empty">Nenhum novo processo encontrado pelo Radar.</div><div class="actions"><a class="btn" href="/radar">Abrir Radar</a><a class="btn" href="/painel">Voltar ao painel</a></div></section>""","Novos processos")
+
+@app.get("/alertas",response_class=HTMLResponse)
+def alertas(request:Request):
+    if not auth(request): return RedirectResponse("/",303)
+    return page(f"""<section class="card">{app_header("Alertas","Central de citações, intimações, prazos, audiências e ocorrências relevantes.")}<div class="empty">Nenhum alerta automático ativo.</div><div class="section"><div class="grid"><div class="box"><div class="label">Urgente</div><div class="value">Citação, intimação, prazo, audiência, bloqueio</div></div><div class="box"><div class="label">Importante</div><div class="value">Decisão, despacho, documento novo</div></div><div class="box"><div class="label">Informativo</div><div class="value">Atualizações administrativas</div></div></div></div><div class="actions"><a class="btn" href="/painel">Voltar ao painel</a></div></section>""","Alertas")
 
 @app.get("/processos",response_class=HTMLResponse)
 def processos(request:Request):

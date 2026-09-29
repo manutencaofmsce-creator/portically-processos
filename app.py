@@ -1,11 +1,13 @@
 import os, time, secrets, hashlib, hmac, html
 from datetime import datetime, timezone, timedelta
 import resend
+import psycopg
+from cryptography.fernet import Fernet
 from fastapi import FastAPI, Form, Request, Response
 from fastapi.responses import HTMLResponse, RedirectResponse
 
-APP_VERSION="1.2.2"
-UPDATE_LABEL="Atualização 12 · V12"
+APP_VERSION="1.2.3"
+UPDATE_LABEL="Atualização 13 · V13"
 AUTHORIZED_EMAIL=os.environ.get("AUTHORIZED_EMAIL","").strip().lower()
 SESSION_SECRET=os.environ.get("SESSION_SECRET","")
 RESEND_API_KEY=os.environ.get("RESEND_API_KEY","").strip()
@@ -110,6 +112,25 @@ def valid_cnpj(v):
     d2=calc(n[:12]+d1,[6,5,4,3,2,9,8,7,6,5,4,3,2])
     return n[-2:]==d1+d2
 
+def valid_whatsapp(value):
+    n=only_digits(value)
+    return 10 <= len(n) <= 13
+
+def normalize_whatsapp(value):
+    n=only_digits(value)
+    if len(n) in (10,11):
+        n="55"+n
+    return n
+
+def mask_whatsapp(value):
+    n=normalize_whatsapp(value)
+    if len(n)>=12:
+        return f"+{n[:2]} (***) *****-{n[-4:]}"
+    return "Não informado"
+
+def encrypt_value(value):
+    return crypto_box().encrypt(str(value).encode()).decode()
+
 def mask_doc(kind,value):
     n=only_digits(value)
     if kind=="CPF" and len(n)==11: return f"{n[:3]}.***.***-{n[-2:]}"
@@ -149,6 +170,8 @@ def init_db():
                 created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                 updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             )""")
+            cur.execute("ALTER TABLE radar_items ADD COLUMN IF NOT EXISTS whatsapp_cipher TEXT")
+            cur.execute("ALTER TABLE radar_items ADD COLUMN IF NOT EXISTS whatsapp_mask TEXT")
             cur.execute("""CREATE TABLE IF NOT EXISTS audit_log(
                 id BIGSERIAL PRIMARY KEY,
                 action TEXT NOT NULL,
@@ -169,7 +192,7 @@ def list_radar_items():
     if not db_ready(): return []
     with db_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute("""SELECT id,tipo,nome,mascara,frequencia,email_alerta,whatsapp_alerta,status,created_at
+            cur.execute("""SELECT id,tipo,nome,mascara,frequencia,email_alerta,whatsapp_alerta,status,created_at,whatsapp_mask
                            FROM radar_items ORDER BY created_at DESC""")
             rows=cur.fetchall()
     items=[]
@@ -178,7 +201,7 @@ def list_radar_items():
         if r[5]: canais.append("E-mail")
         if r[6]: canais.append("WhatsApp")
         items.append({"id":r[0],"tipo":r[1],"nome":r[2],"mascara":r[3],"frequencia":r[4],
-                      "canais":", ".join(canais) if canais else "Somente sistema","status":r[7],"created_at":r[8]})
+                      "canais":", ".join(canais) if canais else "Somente sistema","status":r[7],"created_at":r[8],"whatsapp":r[9] or "—"})
     return items
 
 @app.on_event("startup")
@@ -263,7 +286,7 @@ def tab_content(tab):
         return """<div class="grid"><div class="box"><div class="label">Autor / Exequente</div><div class="value">Francisco Fábio Dias da Silva</div></div><div class="box"><div class="label">Réu / Executado</div><div class="value">Portically Tecnologia Ltda. e outros</div></div><div class="box"><div class="label">Destinatária indicada no mandado</div><div class="value">Fernanda Geroncio Pinheiro Dantas</div></div></div>"""
     if tab=="historico":
         return f"""<div class="grid"><div class="box"><span class="chip green">ATUAL</span><div class="label" style="margin-top:8px">Versão</div><div class="value">v{APP_VERSION} · {UPDATE_LABEL}</div><p>Abas funcionais, documentos, movimentações, histórico e identificação visual permanente da versão atual.</p></div>
-<div class="box"><div class="label">Versão anterior</div><div class="value">v1.2.1 · Atualização 11 · V11</div><p>Agrupamento do caso e vínculo entre processo principal e carta precatória.</p></div></div>"""
+<div class="box"><div class="label">Versão anterior</div><div class="value">v1.2.2 · Atualização 12 · V12</div><p>Agrupamento do caso e vínculo entre processo principal e carta precatória.</p></div></div>"""
     return f"""<div class="notice"><b>Leitura rápida:</b> Processo em fase de execução. Há uma carta precatória vinculada no TRT-21, em Natal/RN, destinada ao cumprimento de citação originada no processo principal de Fortaleza/CE.</div>
 <div class="grid"><div class="box"><div class="label">Processo principal</div><div class="value cnj">{MAIN["cnj"]}</div></div><div class="box"><div class="label">Tribunal</div><div class="value">{MAIN["court"]}</div><p>{MAIN["unit"]}</p></div><div class="box"><div class="label">Fase</div><div class="value">{MAIN["phase"]}</div></div><div class="box"><div class="label">Sincronização</div><div class="value">{validation_status()[0]}</div><p>{validation_status()[1]} de 6 itens confirmados</p><a class="btn" href="/processos/{MAIN["cnj"]}?tab=validacao">Iniciar validação</a></div></div>
 <div class="section"><h2>Entenda este processo</h2><div class="grid"><div class="box"><h3>Execução</h3><p>Fase em que o Judiciário busca o cumprimento da obrigação ou pagamento indicado no processo.</p></div><div class="box"><h3>Por que há um processo em Natal?</h3><p>O processo principal tramita em Fortaleza/CE. A carta precatória foi aberta no TRT-21 para cumprir uma diligência em Natal/RN.</p></div><div class="box"><h3>Carta Precatória</h3><p>É o instrumento usado para pedir a outro juízo que cumpra uma diligência fora da área do processo principal.</p></div></div></div>"""
@@ -327,7 +350,7 @@ def radar(request:Request,msg:str=""):
     items=list_radar_items() if db_ready() else []
     rows=""
     for item in items:
-        rows+=f"""<div class="radar-row"><div><div class="value">{esc(item["nome"])}</div><div class="tiny">{item["tipo"]} · {esc(item["mascara"])}</div></div><div><div class="label">Frequência</div><div>{esc(item["frequencia"])}</div></div><div><div class="label">Alertas</div><div>{esc(item["canais"])}</div></div><div><span class="chip amber">{esc(item["status"])}</span></div><form method="post" action="/radar/{item["id"]}/excluir"><button class="danger" type="submit">Excluir</button></form></div>"""
+        rows+=f"""<div class="radar-row"><div><div class="value">{esc(item["nome"])}</div><div class="tiny">{item["tipo"]} · {esc(item["mascara"])}</div></div><div><div class="label">Frequência</div><div>{esc(item["frequencia"])}</div></div><div><div class="label">Alertas</div><div>{esc(item["canais"])}</div><div class="tiny">{esc(item["whatsapp"])}</div></div><div><span class="chip amber">{esc(item["status"])}</span></div><form method="post" action="/radar/{item["id"]}/excluir"><button class="danger" type="submit">Excluir</button></form></div>"""
     if not rows:
         rows='<div class="empty">Nenhum CPF ou CNPJ cadastrado.</div>'
     notice=f'<div class="notice">{esc(msg)}</div>' if msg else ''
@@ -344,30 +367,34 @@ def radar(request:Request,msg:str=""):
 </div>
 <div class="form-grid">
 <div><label><input type="checkbox" name="email_alerta" value="1" style="width:auto"> Avisar por e-mail</label></div>
-<div><label><input type="checkbox" name="whatsapp_alerta" value="1" style="width:auto"> Avisar por WhatsApp</label></div>
-</div><button type="submit" {'disabled' if not db_ready() else ''}>Adicionar ao Radar</button></form></div>
+<div><label><input type="checkbox" name="whatsapp_alerta" value="1" style="width:auto"> Avisar por WhatsApp</label><input name="whatsapp_numero" inputmode="tel" placeholder="Ex.: 84 99999-9999"><div class="tiny">Informe o número que receberá os alertas. Será armazenado criptografado.</div></div>
+</div><button type="submit">Adicionar ao Radar</button></form></div>
 <div class="section"><h2>Monitorados · {len(items)}</h2><div class="proc">{rows}</div></div>
 <div class="actions"><a class="btn" href="/painel">Voltar ao painel</a></div></section>"""
     return page(body,"Radar Processual")
 
 @app.post("/radar/adicionar")
-def radar_adicionar(request:Request,tipo:str=Form(...),nome:str=Form(...),documento:str=Form(...),frequencia:str=Form("Diária"),email_alerta:str=Form(None),whatsapp_alerta:str=Form(None)):
+def radar_adicionar(request:Request,tipo:str=Form(...),nome:str=Form(...),documento:str=Form(...),frequencia:str=Form("Diária"),email_alerta:str=Form(None),whatsapp_alerta:str=Form(None),whatsapp_numero:str=Form("")):
     if not auth(request): return RedirectResponse("/",303)
     tipo=tipo.strip().upper()
     numero=only_digits(documento)
     ok=(tipo=="CPF" and valid_cpf(numero)) or (tipo=="CNPJ" and valid_cnpj(numero))
     if not ok:
         return RedirectResponse("/radar?msg=CPF/CNPJ inválido. Confira os números e tente novamente.",303)
+    if whatsapp_alerta and not valid_whatsapp(whatsapp_numero):
+        return RedirectResponse("/radar?msg=Informe um número de WhatsApp válido para ativar os alertas.",303)
     if not db_ready():
-        return RedirectResponse("/radar?msg=Banco seguro ainda não está vinculado ao serviço.",303)
+        return RedirectResponse("/radar?msg=Banco seguro ainda não está vinculado ao serviço. O cadastro não foi gravado.",303)
     item_id=secrets.token_hex(8)
     try:
         with db_conn() as conn:
             with conn.cursor() as cur:
-                cur.execute("""INSERT INTO radar_items(id,tipo,nome,doc_cipher,doc_hash,mascara,frequencia,email_alerta,whatsapp_alerta,status)
-                               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                cur.execute("""INSERT INTO radar_items(id,tipo,nome,doc_cipher,doc_hash,mascara,frequencia,email_alerta,whatsapp_alerta,status,whatsapp_cipher,whatsapp_mask)
+                               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
                             (item_id,tipo,nome.strip(),encrypt_doc(numero),doc_fingerprint(numero),mask_doc(tipo,numero),frequencia,
-                             bool(email_alerta),bool(whatsapp_alerta),"Aguardando integração"))
+                             bool(email_alerta),bool(whatsapp_alerta),"Aguardando integração",
+                             encrypt_value(normalize_whatsapp(whatsapp_numero)) if whatsapp_alerta else None,
+                             mask_whatsapp(whatsapp_numero) if whatsapp_alerta else None))
         audit("CREATE","radar_item",item_id,f"{tipo} {mask_doc(tipo,numero)}")
     except Exception:
         return RedirectResponse("/radar?msg=Este documento já está cadastrado ou ocorreu uma falha segura no banco.",303)

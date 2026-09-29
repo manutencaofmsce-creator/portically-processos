@@ -6,8 +6,8 @@ from cryptography.fernet import Fernet
 from fastapi import FastAPI, Form, Request, Response
 from fastapi.responses import HTMLResponse, RedirectResponse
 
-APP_VERSION="1.2.7"
-UPDATE_LABEL="Atualização 17 · V17"
+APP_VERSION="1.2.8"
+UPDATE_LABEL="Atualização 18 · V18"
 AUTHORIZED_EMAIL=os.environ.get("AUTHORIZED_EMAIL","").strip().lower()
 SESSION_SECRET=os.environ.get("SESSION_SECRET","")
 RESEND_API_KEY=os.environ.get("RESEND_API_KEY","").strip()
@@ -96,6 +96,11 @@ function validCNPJ(value){{
   const d1=calcCNPJ(n.slice(0,12),[5,4,3,2,9,8,7,6,5,4,3,2]);
   const d2=calcCNPJ(n.slice(0,12)+d1,[6,5,4,3,2,9,8,7,6,5,4,3,2]);
   return n.slice(-2)===d1+d2;
+}}
+function changeDocumentoType(){{
+  const doc=document.getElementById("radar_documento");
+  if(doc) doc.value="";
+  updateDocumentoMask();
 }}
 function updateDocumentoMask(){{
   const tipo=document.getElementById("radar_tipo");
@@ -192,7 +197,9 @@ document.addEventListener("input",function(e){{
     try{{el.setSelectionRange(s,t)}}catch(_){{}}
   }}
 }});
-setTimeout(updateDocumentoMask,0);
+window.addEventListener("pageshow",updateDocumentoMask);
+window.addEventListener("load",updateDocumentoMask);
+setTimeout(updateDocumentoMask,50);
 </script></head><body>
 <div class="badge"><b>v{APP_VERSION}</b><span>{UPDATE_LABEL}</span></div>
 <main><div class="wrap">{body}</div></main></body></html>""")
@@ -462,7 +469,7 @@ def tab_content(tab):
         return """<div class="grid"><div class="box"><div class="label">Autor / Exequente</div><div class="value">Francisco Fábio Dias da Silva</div></div><div class="box"><div class="label">Réu / Executado</div><div class="value">Portically Tecnologia Ltda. e outros</div></div><div class="box"><div class="label">Destinatária indicada no mandado</div><div class="value">Fernanda Geroncio Pinheiro Dantas</div></div></div>"""
     if tab=="historico":
         return f"""<div class="grid"><div class="box"><span class="chip green">ATUAL</span><div class="label" style="margin-top:8px">Versão</div><div class="value">v{APP_VERSION} · {UPDATE_LABEL}</div><p>Abas funcionais, documentos, movimentações, histórico e identificação visual permanente da versão atual.</p></div>
-<div class="box"><div class="label">Versão anterior</div><div class="value">v1.2.6 · Atualização 16 · V16</div><p>Agrupamento do caso e vínculo entre processo principal e carta precatória.</p></div></div>"""
+<div class="box"><div class="label">Versão anterior</div><div class="value">v1.2.7 · Atualização 17 · V17</div><p>Agrupamento do caso e vínculo entre processo principal e carta precatória.</p></div></div>"""
     return f"""<div class="notice"><b>Leitura rápida:</b> Processo em fase de execução. Há uma carta precatória vinculada no TRT-21, em Natal/RN, destinada ao cumprimento de citação originada no processo principal de Fortaleza/CE.</div>
 <div class="grid"><div class="box"><div class="label">Processo principal</div><div class="value cnj">{MAIN["cnj"]}</div></div><div class="box"><div class="label">Tribunal</div><div class="value">{MAIN["court"]}</div><p>{MAIN["unit"]}</p></div><div class="box"><div class="label">Fase</div><div class="value">{MAIN["phase"]}</div></div><div class="box"><div class="label">Sincronização</div><div class="value">{validation_status()[0]}</div><p>{validation_status()[1]} de 6 itens confirmados</p><a class="btn" href="/processos/{MAIN["cnj"]}?tab=validacao">Iniciar validação</a></div></div>
 <div class="section"><h2>Entenda este processo</h2><div class="grid"><div class="box"><h3>Execução</h3><p>Fase em que o Judiciário busca o cumprimento da obrigação ou pagamento indicado no processo.</p></div><div class="box"><h3>Por que há um processo em Natal?</h3><p>O processo principal tramita em Fortaleza/CE. A carta precatória foi aberta no TRT-21 para cumprir uma diligência em Natal/RN.</p></div><div class="box"><h3>Carta Precatória</h3><p>É o instrumento usado para pedir a outro juízo que cumpra uma diligência fora da área do processo principal.</p></div></div></div>"""
@@ -536,13 +543,13 @@ def radar(request:Request,msg:str=""):
 <div class="notice"><b>Como funciona:</b> o cadastro abaixo cria o alvo de monitoramento. A busca automática nas fontes oficiais será ativada conforme cada fonte permitir pesquisa por CPF/CNPJ. CAPTCHA, login e restrições não serão contornados.</div>
 <div class="proc"><h2>Novo monitoramento</h2>
 <form method="post" action="/radar/adicionar"><div class="form-grid">
-<div><label>Tipo</label><select name="tipo" id="radar_tipo" required><option>CPF</option><option>CNPJ</option></select></div>
+<div><label>Tipo</label><select name="tipo" id="radar_tipo" required onchange="changeDocumentoType()"><option>CPF</option><option>CNPJ</option></select></div>
 <div><label>Nome / Razão social</label><input name="nome" required placeholder="Identificação do titular"></div>
 <div><label id="radar_documento_label">CPF</label><input name="documento" id="radar_documento" required inputmode="numeric" maxlength="14" placeholder="XXX.XXX.XXX-XX" autocomplete="off"><div class="mask-guide" id="radar_mask_guide">FORMATO: XXX.XXX.XXX-XX</div><div id="radar_documento_status"></div></div>
 <div><label>Frequência</label><select name="frequencia"><option>Diária</option><option>Semanal</option><option>Manual</option></select></div>
 </div>
 <div class="form-grid">
-<div><label><input type="checkbox" name="email_alerta" value="1" style="width:auto"> Avisar por e-mail</label><input type="email" name="email_alerta_endereco" autocomplete="email" placeholder="exemplo@dominio.com"><div class="tiny">O e-mail será convertido automaticamente para letras minúsculas e armazenado criptografado.</div></div>
+<div><label><input type="checkbox" name="email_alerta" value="1" style="width:auto"> Avisar por e-mail</label><input type="email" name="email_alerta_endereco" autocomplete="email" placeholder="exemplo@dominio.com"><div class="tiny">Informe o e-mail que receberá os alertas.</div></div>
 <div><label><input type="checkbox" name="whatsapp_alerta" value="1" style="width:auto"> Avisar por WhatsApp</label><input name="whatsapp_numero" inputmode="tel" placeholder="Ex.: 84 99999-9999"><div class="tiny">Informe o número que receberá os alertas. Será armazenado criptografado.</div></div>
 </div><button type="submit">Adicionar ao Radar</button></form></div>
 <div class="section"><h2>Monitorados · {len(items)}</h2><div class="proc">{rows}</div></div>

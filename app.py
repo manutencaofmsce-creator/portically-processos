@@ -4,10 +4,10 @@ import resend
 import psycopg
 from cryptography.fernet import Fernet
 from fastapi import FastAPI, Form, Request, Response
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, PlainTextResponse
 
-APP_VERSION="1.2.8"
-UPDATE_LABEL="Atualização 18 · V18"
+APP_VERSION="1.2.9"
+UPDATE_LABEL="Atualização 19 · V19"
 AUTHORIZED_EMAIL=os.environ.get("AUTHORIZED_EMAIL","").strip().lower()
 SESSION_SECRET=os.environ.get("SESSION_SECRET","")
 RESEND_API_KEY=os.environ.get("RESEND_API_KEY","").strip()
@@ -55,154 +55,158 @@ button,.btn{{display:inline-block;padding:12px 15px;border:0;border-radius:10px;
 .badge{{position:fixed;right:14px;bottom:14px;z-index:50;background:#0b1c2d;border:1px solid #315776;border-radius:11px;padding:8px 11px;box-shadow:0 10px 30px #0008;display:flex;align-items:center;gap:7px}}.badge b{{font-size:11px}}.badge span{{font-size:10px;color:#8ec8ff}}.badge small{{display:none}}
 @media(max-width:600px){{main{{padding:12px 12px 92px}}.card{{padding:16px}}h1{{font-size:24px}}}}
 </style>
-<script>
-function cpfDigits(v){{return v.replace(/\D/g,"").slice(0,11);}}
-function cnpjChars(v){{return v.toUpperCase().replace(/[^0-9A-Z]/g,"").slice(0,14);}}
-function formatCPF(value){{
+<script src="/assets/app.js" defer></script></head><body>
+<div class="badge"><b>v{APP_VERSION}</b><span>{UPDATE_LABEL}</span></div>
+<main><div class="wrap">{body}</div></main></body></html>""")
+
+
+APP_JS = r"""
+function cpfDigits(v){ return v.replace(/\D/g,"").slice(0,11); }
+function cnpjChars(v){ return v.toUpperCase().replace(/[^0-9A-Z]/g,"").slice(0,14); }
+
+function formatCPF(value){
   const n=cpfDigits(value);
-  return n.replace(/(\d{{3}})(\d)/,"$1.$2")
-          .replace(/(\d{{3}})(\d)/,"$1.$2")
-          .replace(/(\d{{3}})(\d{{1,2}})$/,"$1-$2");
-}}
-function formatCNPJ(value){{
+  return n.replace(/(\d{3})(\d)/,"$1.$2")
+          .replace(/(\d{3})(\d)/,"$1.$2")
+          .replace(/(\d{3})(\d{1,2})$/,"$1-$2");
+}
+function formatCNPJ(value){
   const n=cnpjChars(value);
-  return n.replace(/^(.{{2}})(.)/,"$1.$2")
-          .replace(/^(.{{2}})\.(.{{3}})(.)/,"$1.$2.$3")
-          .replace(/\.(.{{3}})(.)/,".$1/$2")
-          .replace(/(.{{4}})(.{{1,2}})$/,"$1-$2");
-}}
-function validCPF(value){{
+  return n.replace(/^(.{2})(.)/,"$1.$2")
+          .replace(/^(.{2})\.(.{3})(.)/,"$1.$2.$3")
+          .replace(/\.(.{3})(.)/,".$1/$2")
+          .replace(/(.{4})(.{1,2})$/,"$1-$2");
+}
+function validCPF(value){
   const n=cpfDigits(value);
-  if(n.length!==11 || /^(\d)\1{{10}}$/.test(n)) return false;
-  for(let size=9;size<=10;size++){{
+  if(n.length!==11 || /^(\d)\1{10}$/.test(n)) return false;
+  for(let size=9;size<=10;size++){
     let sum=0;
     for(let i=0;i<size;i++) sum+=Number(n[i])*(size+1-i);
-    let d=(sum*10)%11;if(d===10)d=0;
+    let d=(sum*10)%11;
+    if(d===10) d=0;
     if(d!==Number(n[size])) return false;
-  }}
+  }
   return true;
-}}
-function cnpjValue(ch){{return ch.charCodeAt(0)-48;}}
-function calcCNPJ(base,weights){{
+}
+function cnpjValue(ch){ return ch.charCodeAt(0)-48; }
+function calcCNPJ(base,weights){
   let sum=0;
   for(let i=0;i<base.length;i++) sum+=cnpjValue(base[i])*weights[i];
   const r=sum%11;
   return String((r===0||r===1)?0:11-r);
-}}
-function validCNPJ(value){{
+}
+function validCNPJ(value){
   const n=cnpjChars(value);
-  if(!/^[0-9A-Z]{{12}}[0-9]{{2}}$/.test(n)) return false;
-  if(/^([0-9])\1{{13}}$/.test(n)) return false;
+  if(!/^[0-9A-Z]{12}[0-9]{2}$/.test(n)) return false;
+  if(/^([0-9])\1{13}$/.test(n)) return false;
   const d1=calcCNPJ(n.slice(0,12),[5,4,3,2,9,8,7,6,5,4,3,2]);
   const d2=calcCNPJ(n.slice(0,12)+d1,[6,5,4,3,2,9,8,7,6,5,4,3,2]);
   return n.slice(-2)===d1+d2;
-}}
-function changeDocumentoType(){{
-  const doc=document.getElementById("radar_documento");
-  if(doc) doc.value="";
-  updateDocumentoMask();
-}}
-function updateDocumentoMask(){{
-  const tipo=document.getElementById("radar_tipo");
-  const doc=document.getElementById("radar_documento");
-  const guide=document.getElementById("radar_mask_guide");
-  const label=document.getElementById("radar_documento_label");
-  const status=document.getElementById("radar_documento_status");
-  if(!tipo||!doc||!guide||!label||!status) return;
+}
+function getRadarEls(){
+  return {
+    tipo:document.getElementById("radar_tipo"),
+    doc:document.getElementById("radar_documento"),
+    guide:document.getElementById("radar_mask_guide"),
+    status:document.getElementById("radar_documento_status")
+  };
+}
+function updateDocumentoMask(clearValue){
+  const {tipo,doc,guide,status}=getRadarEls();
+  if(!tipo||!doc||!guide||!status) return;
+  if(clearValue) doc.value="";
   doc.classList.remove("input-error","input-ok");
   status.className="";
   status.textContent="";
-  if(tipo.value==="CNPJ"){{
-    label.textContent="CNPJ";
+  guide.style.display="block";
+  if(tipo.value==="CNPJ"){
     guide.textContent="FORMATO: XX.XXX.XXX/XXXX-XX";
     doc.placeholder="XX.XXX.XXX/XXXX-XX";
     doc.inputMode="text";
     doc.maxLength=18;
     doc.value=formatCNPJ(doc.value);
-  }}else{{
-    label.textContent="CPF";
+  }else{
     guide.textContent="FORMATO: XXX.XXX.XXX-XX";
     doc.placeholder="XXX.XXX.XXX-XX";
     doc.inputMode="numeric";
     doc.maxLength=14;
     doc.value=formatCPF(doc.value);
-  }}
+  }
   validateDocumentoField(false);
-}}
-function validateDocumentoField(force){{
-  const tipo=document.getElementById("radar_tipo");
-  const doc=document.getElementById("radar_documento");
-  const status=document.getElementById("radar_documento_status");
-  const guide=document.getElementById("radar_mask_guide");
-  if(!tipo||!doc||!status||!guide) return true;
+}
+function validateDocumentoField(force){
+  const {tipo,doc,guide,status}=getRadarEls();
+  if(!tipo||!doc||!guide||!status) return true;
   const raw=tipo.value==="CNPJ"?cnpjChars(doc.value):cpfDigits(doc.value);
-  const complete=raw.length===(tipo.value==="CNPJ"?14:11);
+  const requiredLength=tipo.value==="CNPJ"?14:11;
+  const complete=raw.length===requiredLength;
   doc.classList.remove("input-error","input-ok");
   status.className="";
   status.textContent="";
   guide.style.display=complete?"none":"block";
-  if(!complete){{
-    if(force && raw.length>0){{
+  if(!complete){
+    if(force && raw.length>0){
       status.className="field-error";
       status.textContent=(tipo.value==="CNPJ"?"CNPJ":"CPF")+" INCOMPLETO.";
       doc.classList.add("input-error");
-      return false;
-    }}
+    }
     return false;
-  }}
+  }
   const ok=tipo.value==="CNPJ"?validCNPJ(raw):validCPF(raw);
-  if(ok){{
+  if(ok){
     status.className="field-ok";
     status.textContent=(tipo.value==="CNPJ"?"CNPJ":"CPF")+" VÁLIDO.";
     doc.classList.add("input-ok");
     return true;
-  }}
+  }
   status.className="field-error";
   status.textContent=(tipo.value==="CNPJ"?"CNPJ":"CPF")+" INVÁLIDO. CONFIRA OS DÍGITOS INFORMADOS.";
   doc.classList.add("input-error");
   return false;
-}}
-document.addEventListener("change",function(e){{
-  if(e.target&&e.target.id==="radar_tipo") updateDocumentoMask();
-}});
-document.addEventListener("blur",function(e){{
-  if(e.target&&e.target.id==="radar_documento") validateDocumentoField(true);
-}},true);
-document.addEventListener("submit",function(e){{
-  if(e.target&&e.target.action&&e.target.action.includes("/radar/adicionar")){{
-    if(!validateDocumentoField(true)){{
+}
+document.addEventListener("change",function(e){
+  if(e.target && e.target.id==="radar_tipo") updateDocumentoMask(true);
+});
+document.addEventListener("blur",function(e){
+  if(e.target && e.target.id==="radar_documento") validateDocumentoField(true);
+},true);
+document.addEventListener("submit",function(e){
+  if(e.target && e.target.action && e.target.action.includes("/radar/adicionar")){
+    if(!validateDocumentoField(true)){
       e.preventDefault();
       const doc=document.getElementById("radar_documento");
       if(doc) doc.focus();
-    }}
-  }}
-}});
-document.addEventListener("input",function(e){{
+    }
+  }
+});
+document.addEventListener("input",function(e){
   const el=e.target;
-  if(el.id==="radar_documento"){{
+  if(el.id==="radar_documento"){
     const tipo=document.getElementById("radar_tipo");
-    el.value=(tipo&&tipo.value==="CNPJ")?formatCNPJ(el.value):formatCPF(el.value);
+    el.value=(tipo && tipo.value==="CNPJ")?formatCNPJ(el.value):formatCPF(el.value);
     validateDocumentoField(false);
     return;
-  }}
-  if(el.matches('input[type="email"]')){{
+  }
+  if(el.matches('input[type="email"]')){
     const s=el.selectionStart,t=el.selectionEnd;
     el.value=el.value.toLowerCase();
-    try{{el.setSelectionRange(s,t)}}catch(_){{}}
+    try{el.setSelectionRange(s,t)}catch(_){}
     return;
-  }}
-  if(el.matches('input[type="text"],input[type="search"],input[type="tel"],textarea')){{
+  }
+  if(el.matches('input[type="text"],input[type="search"],input[type="tel"],textarea')){
     const s=el.selectionStart,t=el.selectionEnd;
     el.value=el.value.toLocaleUpperCase("pt-BR");
-    try{{el.setSelectionRange(s,t)}}catch(_){{}}
-  }}
-}});
-window.addEventListener("pageshow",updateDocumentoMask);
-window.addEventListener("load",updateDocumentoMask);
-setTimeout(updateDocumentoMask,50);
-</script></head><body>
-<div class="badge"><b>v{APP_VERSION}</b><span>{UPDATE_LABEL}</span></div>
-<main><div class="wrap">{body}</div></main></body></html>""")
+    try{el.setSelectionRange(s,t)}catch(_){}
+  }
+});
+window.addEventListener("pageshow",function(){ updateDocumentoMask(false); });
+window.addEventListener("load",function(){ updateDocumentoMask(false); });
+"""
+
+@app.get("/assets/app.js", response_class=PlainTextResponse)
+def app_js():
+    return PlainTextResponse(APP_JS, media_type="application/javascript")
 
 def hash_code(email,code):
     return hmac.new(SESSION_SECRET.encode(),f"{email}:{code}".encode(),hashlib.sha256).hexdigest()
@@ -469,7 +473,7 @@ def tab_content(tab):
         return """<div class="grid"><div class="box"><div class="label">Autor / Exequente</div><div class="value">Francisco Fábio Dias da Silva</div></div><div class="box"><div class="label">Réu / Executado</div><div class="value">Portically Tecnologia Ltda. e outros</div></div><div class="box"><div class="label">Destinatária indicada no mandado</div><div class="value">Fernanda Geroncio Pinheiro Dantas</div></div></div>"""
     if tab=="historico":
         return f"""<div class="grid"><div class="box"><span class="chip green">ATUAL</span><div class="label" style="margin-top:8px">Versão</div><div class="value">v{APP_VERSION} · {UPDATE_LABEL}</div><p>Abas funcionais, documentos, movimentações, histórico e identificação visual permanente da versão atual.</p></div>
-<div class="box"><div class="label">Versão anterior</div><div class="value">v1.2.7 · Atualização 17 · V17</div><p>Agrupamento do caso e vínculo entre processo principal e carta precatória.</p></div></div>"""
+<div class="box"><div class="label">Versão anterior</div><div class="value">v1.2.8 · Atualização 18 · V18</div><p>Agrupamento do caso e vínculo entre processo principal e carta precatória.</p></div></div>"""
     return f"""<div class="notice"><b>Leitura rápida:</b> Processo em fase de execução. Há uma carta precatória vinculada no TRT-21, em Natal/RN, destinada ao cumprimento de citação originada no processo principal de Fortaleza/CE.</div>
 <div class="grid"><div class="box"><div class="label">Processo principal</div><div class="value cnj">{MAIN["cnj"]}</div></div><div class="box"><div class="label">Tribunal</div><div class="value">{MAIN["court"]}</div><p>{MAIN["unit"]}</p></div><div class="box"><div class="label">Fase</div><div class="value">{MAIN["phase"]}</div></div><div class="box"><div class="label">Sincronização</div><div class="value">{validation_status()[0]}</div><p>{validation_status()[1]} de 6 itens confirmados</p><a class="btn" href="/processos/{MAIN["cnj"]}?tab=validacao">Iniciar validação</a></div></div>
 <div class="section"><h2>Entenda este processo</h2><div class="grid"><div class="box"><h3>Execução</h3><p>Fase em que o Judiciário busca o cumprimento da obrigação ou pagamento indicado no processo.</p></div><div class="box"><h3>Por que há um processo em Natal?</h3><p>O processo principal tramita em Fortaleza/CE. A carta precatória foi aberta no TRT-21 para cumprir uma diligência em Natal/RN.</p></div><div class="box"><h3>Carta Precatória</h3><p>É o instrumento usado para pedir a outro juízo que cumpra uma diligência fora da área do processo principal.</p></div></div></div>"""
@@ -543,9 +547,9 @@ def radar(request:Request,msg:str=""):
 <div class="notice"><b>Como funciona:</b> o cadastro abaixo cria o alvo de monitoramento. A busca automática nas fontes oficiais será ativada conforme cada fonte permitir pesquisa por CPF/CNPJ. CAPTCHA, login e restrições não serão contornados.</div>
 <div class="proc"><h2>Novo monitoramento</h2>
 <form method="post" action="/radar/adicionar"><div class="form-grid">
-<div><label>Tipo</label><select name="tipo" id="radar_tipo" required onchange="changeDocumentoType()"><option>CPF</option><option>CNPJ</option></select></div>
+<div><label>Tipo</label><select name="tipo" id="radar_tipo" required><option>CPF</option><option>CNPJ</option></select></div>
 <div><label>Nome / Razão social</label><input name="nome" required placeholder="Identificação do titular"></div>
-<div><label id="radar_documento_label">CPF</label><input name="documento" id="radar_documento" required inputmode="numeric" maxlength="14" placeholder="XXX.XXX.XXX-XX" autocomplete="off"><div class="mask-guide" id="radar_mask_guide">FORMATO: XXX.XXX.XXX-XX</div><div id="radar_documento_status"></div></div>
+<div><label>CPF/CNPJ</label><input name="documento" id="radar_documento" required inputmode="numeric" maxlength="14" placeholder="XXX.XXX.XXX-XX" autocomplete="off"><div class="mask-guide" id="radar_mask_guide">FORMATO: XXX.XXX.XXX-XX</div><div id="radar_documento_status"></div></div>
 <div><label>Frequência</label><select name="frequencia"><option>Diária</option><option>Semanal</option><option>Manual</option></select></div>
 </div>
 <div class="form-grid">

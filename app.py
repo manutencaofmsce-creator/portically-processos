@@ -4,8 +4,8 @@ import resend
 from fastapi import FastAPI, Form, Request, Response
 from fastapi.responses import HTMLResponse, RedirectResponse
 
-APP_VERSION="1.2.0"
-UPDATE_LABEL="Atualização 10 · V10"
+APP_VERSION="1.2.1"
+UPDATE_LABEL="Atualização 11 · V11"
 AUTHORIZED_EMAIL=os.environ.get("AUTHORIZED_EMAIL","").strip().lower()
 SESSION_SECRET=os.environ.get("SESSION_SECRET","")
 RESEND_API_KEY=os.environ.get("RESEND_API_KEY","").strip()
@@ -15,6 +15,7 @@ OTP_TTL=600
 SESSION_TTL=28800
 OTP_STORE={}
 VALIDATION={"cnj":False,"tribunal":False,"partes":False,"vinculo":False,"documento":False,"prazo":False,"data_ciencia":"","observacoes":"","validated_at":"","validated_by":""}
+RADAR_ITEMS=[]
 
 app=FastAPI(title="Portically Processos",docs_url=None,redoc_url=None)
 
@@ -44,7 +45,7 @@ def page(body,title="Portically Processos"):
 .grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}}.dash{{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:14px;margin:20px 0}}.dash-card{{display:block;text-decoration:none;padding:18px;border-radius:16px;background:linear-gradient(180deg,#0b1d31,#081522);border:1px solid #254866;color:#e8eef7}}.dash-label{{font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:#8fa7bc}}.dash-num{{font-size:34px;font-weight:800;margin:8px 0 4px}}.dash-link{{font-size:13px;color:#77bdff}}.empty{{padding:24px;text-align:center;border:1px dashed #2b4e6c;border-radius:15px;background:#081522;color:#93a9be}}.box{{padding:16px;border-radius:14px;background:#091726;border:1px solid #1e3852}}.proc{{padding:20px;border-radius:16px;background:linear-gradient(180deg,#0a192a,#081522);border:1px solid #254561;box-shadow:inset 0 1px 0 #ffffff08}}.section{{margin-top:20px}}.case-title{{max-width:850px}}.case-sub{{margin:.2rem 0 0}}.case-footer{{display:flex;justify-content:space-between;gap:16px;align-items:end;flex-wrap:wrap;margin-top:16px;padding-top:16px;border-top:1px solid #183149}}.case-location{{margin:0;color:#86a7c5}}
 .label{{font-size:12px;color:#8fa5ba;text-transform:uppercase}}.value{{margin-top:6px;font-weight:700}}.cnj{{font-family:monospace;font-weight:700;word-break:break-word}}
 .notice{{padding:13px;border-radius:12px;background:#0b2136;border:1px solid #295374;color:#c4d9ec;margin-bottom:14px}}.timeline{{border-left:2px solid #2f5271;margin-left:8px;padding-left:20px}}.event{{margin:0 0 18px}}
-.link{{margin-left:8px;padding:12px 0 0 22px;border-left:2px solid #345c80;color:#a8bbce}}.deadline{{border-left:4px solid #ffc857}}.validate-card{{padding:18px;border:1px solid #2b4e6c;border-radius:15px;background:#091827;margin-bottom:12px}}.step{{display:grid;grid-template-columns:42px 1fr auto;gap:14px;align-items:start}}.stepn{{width:34px;height:34px;border-radius:50%;display:grid;place-items:center;background:#173c63;border:1px solid #2f6b9f;font-weight:700}}.checkrow{{display:flex;align-items:center;gap:8px;color:#dce9f5;font-weight:700;white-space:nowrap}}.checkrow input{{width:18px;height:18px;margin:0}}.help{{font-size:13px;color:#8fa7bc;margin-top:6px}}.progress{{height:9px;background:#07111f;border:1px solid #203a54;border-radius:999px;overflow:hidden;margin:10px 0}}.progress i{{display:block;height:100%;background:#2f9b5f}}.status-ok{{color:#9cf0b8}}.status-part{{color:#ffd77b}}.status-pend{{color:#9fb1c4}}textarea{{width:100%;min-height:88px;padding:12px;border-radius:10px;border:1px solid #36516d;background:#07111f;color:#fff;font-family:Arial,sans-serif}}
+.link{{margin-left:8px;padding:12px 0 0 22px;border-left:2px solid #345c80;color:#a8bbce}}.deadline{{border-left:4px solid #ffc857}}.validate-card{{padding:18px;border:1px solid #2b4e6c;border-radius:15px;background:#091827;margin-bottom:12px}}.step{{display:grid;grid-template-columns:42px 1fr auto;gap:14px;align-items:start}}.stepn{{width:34px;height:34px;border-radius:50%;display:grid;place-items:center;background:#173c63;border:1px solid #2f6b9f;font-weight:700}}.checkrow{{display:flex;align-items:center;gap:8px;color:#dce9f5;font-weight:700;white-space:nowrap}}.checkrow input{{width:18px;height:18px;margin:0}}.help{{font-size:13px;color:#8fa7bc;margin-top:6px}}.progress{{height:9px;background:#07111f;border:1px solid #203a54;border-radius:999px;overflow:hidden;margin:10px 0}}.progress i{{display:block;height:100%;background:#2f9b5f}}.status-ok{{color:#9cf0b8}}.status-part{{color:#ffd77b}}.status-pend{{color:#9fb1c4}}textarea{{width:100%;min-height:88px;padding:12px;border-radius:10px;border:1px solid #36516d;background:#07111f;color:#fff;font-family:Arial,sans-serif}}select{{width:100%;padding:14px;border-radius:10px;border:1px solid #36516d;background:#07111f;color:#fff;font-size:16px}}.form-grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}}.radar-row{{display:grid;grid-template-columns:1.2fr .8fr .8fr .7fr auto;gap:12px;align-items:center;padding:14px 0;border-bottom:1px solid #173149}}.radar-row:last-child{{border-bottom:0}}.tiny{{font-size:12px;color:#8fa7bc}}.danger{{background:#5b2430!important}}
 button,.btn{{display:inline-block;padding:12px 15px;border:0;border-radius:10px;background:#1f8cff;color:#fff;font-weight:700;text-decoration:none;cursor:pointer}}input{{width:100%;padding:14px;border-radius:10px;border:1px solid #36516d;background:#07111f;color:#fff;font-size:16px}}label{{display:block;margin:18px 0 8px}}
 .actions{{display:flex;gap:10px;flex-wrap:wrap;margin-top:18px}}.actions form{{margin:0}}.actions form button{{background:#213247}}a{{color:#7fc5ff}}
 .badge{{position:fixed;right:14px;bottom:14px;z-index:50;background:#0b1c2d;border:1px solid #315776;border-radius:11px;padding:8px 11px;box-shadow:0 10px 30px #0008;display:flex;align-items:center;gap:7px}}.badge b{{font-size:11px}}.badge span{{font-size:10px;color:#8ec8ff}}.badge small{{display:none}}
@@ -83,8 +84,38 @@ def app_header(title,subtitle=""):
     sub=f'<p class="case-sub">{esc(subtitle)}</p>' if subtitle else ""
     return f"""<div class="top"><div><div class="brand">PORTICALLY HUB · PROCESSOS</div><h1>{esc(title)}</h1>{sub}</div><div class="header-meta"><span class="version-inline">v{APP_VERSION}</span><span class="version-inline">{UPDATE_LABEL}</span></div></div>"""
 
+def only_digits(v):
+    return "".join(ch for ch in str(v) if ch.isdigit())
+
+def valid_cpf(v):
+    n=only_digits(v)
+    if len(n)!=11 or n==n[0]*11: return False
+    for size in (9,10):
+        s=sum(int(n[i])*(size+1-i) for i in range(size))
+        d=(s*10)%11
+        if d==10: d=0
+        if d!=int(n[size]): return False
+    return True
+
+def valid_cnpj(v):
+    n=only_digits(v)
+    if len(n)!=14 or n==n[0]*14: return False
+    def calc(base,weights):
+        s=sum(int(a)*b for a,b in zip(base,weights))
+        r=s%11
+        return "0" if r<2 else str(11-r)
+    d1=calc(n[:12],[5,4,3,2,9,8,7,6,5,4,3,2])
+    d2=calc(n[:12]+d1,[6,5,4,3,2,9,8,7,6,5,4,3,2])
+    return n[-2:]==d1+d2
+
+def mask_doc(kind,value):
+    n=only_digits(value)
+    if kind=="CPF" and len(n)==11: return f"{n[:3]}.***.***-{n[-2:]}"
+    if kind=="CNPJ" and len(n)==14: return f"{n[:2]}.***.***/****-{n[-2:]}"
+    return "Documento inválido"
+
 def dashboard_counts():
-    return {"processos":1,"cpf_cnpj":0,"movimentacoes":0,"novos_processos":0,"alertas":0,"validacoes":1 if validation_status()[1] < 6 else 0}
+    return {"processos":1,"cpf_cnpj":len(RADAR_ITEMS),"movimentacoes":0,"novos_processos":0,"alertas":0,"validacoes":1 if validation_status()[1] < 6 else 0}
 
 def tabs(active):
     items=[("resumo","Resumo"),("movimentacoes","Movimentações"),("documentos","Documentos"),
@@ -146,7 +177,7 @@ def tab_content(tab):
         return """<div class="grid"><div class="box"><div class="label">Autor / Exequente</div><div class="value">Francisco Fábio Dias da Silva</div></div><div class="box"><div class="label">Réu / Executado</div><div class="value">Portically Tecnologia Ltda. e outros</div></div><div class="box"><div class="label">Destinatária indicada no mandado</div><div class="value">Fernanda Geroncio Pinheiro Dantas</div></div></div>"""
     if tab=="historico":
         return f"""<div class="grid"><div class="box"><span class="chip green">ATUAL</span><div class="label" style="margin-top:8px">Versão</div><div class="value">v{APP_VERSION} · {UPDATE_LABEL}</div><p>Abas funcionais, documentos, movimentações, histórico e identificação visual permanente da versão atual.</p></div>
-<div class="box"><div class="label">Versão anterior</div><div class="value">v1.1.3 · Atualização 09 · V9</div><p>Agrupamento do caso e vínculo entre processo principal e carta precatória.</p></div></div>"""
+<div class="box"><div class="label">Versão anterior</div><div class="value">v1.2.0 · Atualização 10 · V10</div><p>Agrupamento do caso e vínculo entre processo principal e carta precatória.</p></div></div>"""
     return f"""<div class="notice"><b>Leitura rápida:</b> Processo em fase de execução. Há uma carta precatória vinculada no TRT-21, em Natal/RN, destinada ao cumprimento de citação originada no processo principal de Fortaleza/CE.</div>
 <div class="grid"><div class="box"><div class="label">Processo principal</div><div class="value cnj">{MAIN["cnj"]}</div></div><div class="box"><div class="label">Tribunal</div><div class="value">{MAIN["court"]}</div><p>{MAIN["unit"]}</p></div><div class="box"><div class="label">Fase</div><div class="value">{MAIN["phase"]}</div></div><div class="box"><div class="label">Sincronização</div><div class="value">{validation_status()[0]}</div><p>{validation_status()[1]} de 6 itens confirmados</p><a class="btn" href="/processos/{MAIN["cnj"]}?tab=validacao">Iniciar validação</a></div></div>
 <div class="section"><h2>Entenda este processo</h2><div class="grid"><div class="box"><h3>Execução</h3><p>Fase em que o Judiciário busca o cumprimento da obrigação ou pagamento indicado no processo.</p></div><div class="box"><h3>Por que há um processo em Natal?</h3><p>O processo principal tramita em Fortaleza/CE. A carta precatória foi aberta no TRT-21 para cumprir uma diligência em Natal/RN.</p></div><div class="box"><h3>Carta Precatória</h3><p>É o instrumento usado para pedir a outro juízo que cumpra uma diligência fora da área do processo principal.</p></div></div></div>"""
@@ -205,9 +236,53 @@ def painel(request:Request):
     return page(body,"Painel · Portically Processos")
 
 @app.get("/radar",response_class=HTMLResponse)
-def radar(request:Request):
+def radar(request:Request,msg:str=""):
     if not auth(request): return RedirectResponse("/",303)
-    return page(f"""<section class="card">{app_header("Radar Processual","Cadastros de CPF/CNPJ acompanhados pelo sistema.")}<div class="notice">Área preparada para integração com fontes oficiais que permitam pesquisa por CPF/CNPJ.</div><div class="empty">Nenhum CPF ou CNPJ cadastrado.</div><div class="actions"><a class="btn" href="/painel">Voltar ao painel</a></div></section>""","Radar Processual")
+    rows=""
+    for item in RADAR_ITEMS:
+        rows+=f"""<div class="radar-row"><div><div class="value">{esc(item["nome"])}</div><div class="tiny">{item["tipo"]} · {esc(item["mascara"])}</div></div><div><div class="label">Frequência</div><div>{esc(item["frequencia"])}</div></div><div><div class="label">Alertas</div><div>{esc(item["canais"])}</div></div><div><span class="chip amber">{esc(item["status"])}</span></div><form method="post" action="/radar/{item["id"]}/excluir"><button class="danger" type="submit">Excluir</button></form></div>"""
+    if not rows:
+        rows='<div class="empty">Nenhum CPF ou CNPJ cadastrado.</div>'
+    notice=f'<div class="notice">{esc(msg)}</div>' if msg else ''
+    body=f"""<section class="card">{app_header("Radar Processual","Cadastre CPF/CNPJ para acompanhar possíveis novos processos e alertas nas fontes compatíveis.")}
+{notice}
+<div class="notice"><b>Como funciona:</b> o cadastro abaixo cria o alvo de monitoramento. A busca automática nas fontes oficiais será ativada conforme cada fonte permitir pesquisa por CPF/CNPJ. CAPTCHA, login e restrições não serão contornados.</div>
+<div class="proc"><h2>Novo monitoramento</h2>
+<form method="post" action="/radar/adicionar"><div class="form-grid">
+<div><label>Tipo</label><select name="tipo" required><option>CPF</option><option>CNPJ</option></select></div>
+<div><label>Nome / Razão social</label><input name="nome" required placeholder="Identificação do titular"></div>
+<div><label>CPF/CNPJ</label><input name="documento" required inputmode="numeric" placeholder="Somente números ou formatado"></div>
+<div><label>Frequência</label><select name="frequencia"><option>Diária</option><option>Semanal</option><option>Manual</option></select></div>
+</div>
+<div class="form-grid">
+<div><label><input type="checkbox" name="email_alerta" value="1" style="width:auto"> Avisar por e-mail</label></div>
+<div><label><input type="checkbox" name="whatsapp_alerta" value="1" style="width:auto"> Avisar por WhatsApp</label></div>
+</div><button type="submit">Adicionar ao Radar</button></form></div>
+<div class="section"><h2>Monitorados · {len(RADAR_ITEMS)}</h2><div class="proc">{rows}</div></div>
+<div class="actions"><a class="btn" href="/painel">Voltar ao painel</a></div></section>"""
+    return page(body,"Radar Processual")
+
+@app.post("/radar/adicionar")
+def radar_adicionar(request:Request,tipo:str=Form(...),nome:str=Form(...),documento:str=Form(...),frequencia:str=Form("Diária"),email_alerta:str=Form(None),whatsapp_alerta:str=Form(None)):
+    if not auth(request): return RedirectResponse("/",303)
+    tipo=tipo.strip().upper()
+    numero=only_digits(documento)
+    ok=(tipo=="CPF" and valid_cpf(numero)) or (tipo=="CNPJ" and valid_cnpj(numero))
+    if not ok:
+        return RedirectResponse("/radar?msg=CPF/CNPJ inválido. Confira os números e tente novamente.",303)
+    if any(x["tipo"]==tipo and x["numero"]==numero for x in RADAR_ITEMS):
+        return RedirectResponse("/radar?msg=Este documento já está cadastrado no Radar.",303)
+    canais=[]
+    if email_alerta: canais.append("E-mail")
+    if whatsapp_alerta: canais.append("WhatsApp")
+    RADAR_ITEMS.append({"id":secrets.token_hex(4),"tipo":tipo,"nome":nome.strip(),"numero":numero,"mascara":mask_doc(tipo,numero),"frequencia":frequencia,"canais":", ".join(canais) if canais else "Somente sistema","status":"Aguardando integração","created_at":datetime.now(timezone(timedelta(hours=-3))).strftime("%d/%m/%Y %H:%M")})
+    return RedirectResponse("/radar?msg=Monitoramento cadastrado com sucesso.",303)
+
+@app.post("/radar/{item_id}/excluir")
+def radar_excluir(item_id:str,request:Request):
+    if not auth(request): return RedirectResponse("/",303)
+    RADAR_ITEMS[:]=[x for x in RADAR_ITEMS if x["id"]!=item_id]
+    return RedirectResponse("/radar?msg=Monitoramento removido.",303)
 
 @app.get("/movimentacoes",response_class=HTMLResponse)
 def movimentacoes_central(request:Request):

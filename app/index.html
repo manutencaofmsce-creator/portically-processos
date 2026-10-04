@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex,nofollow,noarchive"><meta name="referrer" content="no-referrer">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; media-src 'self' blob:; connect-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'">
+<meta name="theme-color" content="#173f35"><meta name="description" content="Levantamento guiado de campo para estudos eólicos, solares e híbridos. Dados locais e uso offline após preparar o aplicativo.">
+<meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="default">
+<link rel="manifest" href="manifest.webmanifest"><link rel="icon" href="icon-192.png"><link rel="apple-touch-icon" href="icon-192.png"><link rel="stylesheet" href="style.css">
+<title>Portically Campo | Energia · V2</title>
+</head>
+<body>
+<header class="top"><div class="brandmark" aria-hidden="true">P</div><div><div class="brand">PORTICALLY <span>CAMPO</span></div><div class="subbrand">Energia · Levantamento de campo</div></div><div id="connection" class="connection">Verificando rede</div></header>
+<div class="shell"><aside class="sidebar"><div class="sidebar-intro">SEU LEVANTAMENTO</div><nav id="side-nav" aria-label="Navegação principal"></nav><div class="side-note">Dados no seu aparelho.<br>Sem envio automático para servidor.</div><div class="side-version">V2 · v1.0.1<br><span>Coleta não é laudo de viabilidade.</span></div></aside>
+<main id="main" tabindex="-1"><div class="card">Abrindo banco local…</div></main></div>
+<nav id="bottom-nav" class="bottom-nav" aria-label="Navegação móvel"></nav>
+<div id="save-status" class="save-status" role="status">Iniciando</div><div id="screen-code" class="screen-code">CAM-001 · V2</div>
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+<dialog id="dialog"><div id="dialog-body"></div><button id="dialog-close" class="btn ghost">Fechar</button></dialog>
+<input type="file" id="perimeter-file" accept=".geojson,.json,.kml" hidden><input type="file" id="restore-file" accept=".zip,.pcampo" hidden>
+<noscript>Ative o JavaScript para utilizar o aplicativo.</noscript>
+<script src="core.js"></script><script src="checklist.js"></script><script src="store.js"></script><script src="app.js"></script>
+</body></html>

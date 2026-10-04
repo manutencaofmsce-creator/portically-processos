@@ -1,6 +1,6 @@
 /* Portically Campo Energia — V2 · v1.0.1. Dados locais. Sem analytics ou servidor. */
 'use strict';
-const VERSION='V2',SEMVER='1.0.3',SCHEMA=1;
+const VERSION='V2',SEMVER='1.0.4',SCHEMA=1;
 const CHECKLIST=window.CHECKLIST;
 const $=s=>document.querySelector(s),E=Core.esc;
 const NAV=[['home','Início','home'],['checklist','Roteiro','check'],['map','Mapa / GPS','map'],['evidence','Evidências','camera'],['backup','Backup','archive']];

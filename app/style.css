@@ -5,3 +5,4 @@
 @media print{.top,.sidebar,.bottom-nav,.save-status,.screen-code,.actions,.btn,.toast{display:none!important}.shell{display:block}main{padding:0}body{background:#fff}.card,.section{break-inside:avoid;box-shadow:none}}
 
 .hero .empty{color:#d0dfd4;border-color:#ffffff55}
+.top-version{margin-left:auto;color:#8a9691;font-size:9px;letter-spacing:.35px;white-space:nowrap}.top-version span{margin-left:5px}.top .connection{margin-left:0}@media(max-width:700px){.top-version{font-size:8px;line-height:1.25;text-align:right}.top-version span{display:block;margin-left:0}}

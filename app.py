@@ -1,13 +1,14 @@
-import os, time, secrets, hashlib, hmac, html, re
+import os, time, secrets, hashlib, hmac, html, re, uuid
 from datetime import datetime, timezone, timedelta
 import resend
 import psycopg
 from cryptography.fernet import Fernet
-from fastapi import FastAPI, Form, Request, Response
+from fastapi import FastAPI, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, PlainTextResponse
+from otp_auth import OTPAuth
 
-APP_VERSION="1.3.0"
-UPDATE_LABEL="Atualização 20 · V20"
+APP_VERSION="1.3.1"
+UPDATE_LABEL="Atualização 21 · V21"
 AUTHORIZED_EMAIL=os.environ.get("AUTHORIZED_EMAIL","").strip().lower()
 SESSION_SECRET=os.environ.get("SESSION_SECRET","")
 RESEND_API_KEY=os.environ.get("RESEND_API_KEY","").strip()
@@ -16,9 +17,9 @@ DATABASE_URL=os.environ.get("DATABASE_URL","").strip()
 DATA_ENCRYPTION_KEY=os.environ.get("DATA_ENCRYPTION_KEY","").strip()
 DATA_HMAC_KEY=os.environ.get("DATA_HMAC_KEY","").strip()
 resend.api_key=RESEND_API_KEY
-OTP_TTL=600
 SESSION_TTL=28800
-OTP_STORE={}
+OTP_HMAC_KEY=os.environ.get("OTP_HMAC_KEY", "").strip()
+OTP_BROWSER_COOKIE="portically_otp_browser"
 VALIDATION={"cnj":False,"tribunal":False,"partes":False,"vinculo":False,"documento":False,"prazo":False,"data_ciencia":"","observacoes":"","validated_at":"","validated_by":""}
 
 app=FastAPI(title="Portically Processos",docs_url=None,redoc_url=None)
@@ -208,8 +209,30 @@ window.addEventListener("load",function(){ updateDocumentoMask(false); });
 def app_js():
     return PlainTextResponse(APP_JS, media_type="application/javascript")
 
-def hash_code(email,code):
-    return hmac.new(SESSION_SECRET.encode(),f"{email}:{code}".encode(),hashlib.sha256).hexdigest()
+def otp_service():
+    return OTPAuth(DATABASE_URL, OTP_HMAC_KEY, AUTHORIZED_EMAIL)
+
+def otp_browser(request):
+    value=request.cookies.get(OTP_BROWSER_COOKIE, "")
+    return value if re.fullmatch(r"[A-Za-z0-9_-]{43}", value) else ""
+
+def otp_client(request):
+    # Forwarded headers are trusted only when configured by the ASGI server.
+    return request.client.host if request.client else "unknown"
+
+def otp_origin_ok(request):
+    origin=request.headers.get("origin")
+    return not origin or origin == f"{request.url.scheme}://{request.url.netloc}"
+
+def otp_problem(message, status=400, retry_after=0):
+    result=page(f'<section class="card"><h1>{esc(message)}</h1><a href="/">Voltar ao acesso</a></section>')
+    result.status_code=status
+    if retry_after: result.headers["Retry-After"]=str(retry_after)
+    return result
+
+def otp_form(email,challenge,message=""):
+    notice=f'<div class="notice">{esc(message)}</div>' if message else ''
+    return page(f"""<section class="card"><h1>Digite o código</h1>{notice}<p>Se o e-mail estiver autorizado, você receberá um código. Digite-o neste mesmo navegador.</p><form method="post" action="/validar-codigo"><input type="hidden" name="email" value="{esc(email.strip().lower())}"><input type="hidden" name="challenge" value="{esc(challenge)}"><label>Código de 6 dígitos</label><input name="code" minlength="6" maxlength="6" inputmode="numeric" autocomplete="one-time-code" required><button>Entrar</button></form><div class="actions"><a href="/">Solicitar outro código</a></div></section>""")
 
 def make_session(email):
     exp=int(time.time())+SESSION_TTL
@@ -357,33 +380,35 @@ def encrypt_doc(kind,value):
 def init_db():
     if not db_ready(): return
     with db_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute("""CREATE TABLE IF NOT EXISTS radar_items(
-                id TEXT PRIMARY KEY,
-                tipo TEXT NOT NULL CHECK (tipo IN ('CPF','CNPJ')),
-                nome TEXT NOT NULL,
-                doc_cipher TEXT NOT NULL,
-                doc_hash TEXT NOT NULL UNIQUE,
-                mascara TEXT NOT NULL,
-                frequencia TEXT NOT NULL,
-                email_alerta BOOLEAN NOT NULL DEFAULT FALSE,
-                whatsapp_alerta BOOLEAN NOT NULL DEFAULT FALSE,
-                status TEXT NOT NULL,
-                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-            )""")
-            cur.execute("ALTER TABLE radar_items ADD COLUMN IF NOT EXISTS whatsapp_cipher TEXT")
-            cur.execute("ALTER TABLE radar_items ADD COLUMN IF NOT EXISTS whatsapp_mask TEXT")
-            cur.execute("ALTER TABLE radar_items ADD COLUMN IF NOT EXISTS email_cipher TEXT")
-            cur.execute("ALTER TABLE radar_items ADD COLUMN IF NOT EXISTS email_mask TEXT")
-            cur.execute("""CREATE TABLE IF NOT EXISTS audit_log(
-                id BIGSERIAL PRIMARY KEY,
-                action TEXT NOT NULL,
-                entity_type TEXT NOT NULL,
-                entity_id TEXT,
-                details TEXT,
-                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-            )""")
+        with conn.transaction():
+            conn.execute("SELECT pg_advisory_xact_lock(731224010021)")
+            with conn.cursor() as cur:
+                cur.execute("""CREATE TABLE IF NOT EXISTS radar_items(
+                    id TEXT PRIMARY KEY,
+                    tipo TEXT NOT NULL CHECK (tipo IN ('CPF','CNPJ')),
+                    nome TEXT NOT NULL,
+                    doc_cipher TEXT NOT NULL,
+                    doc_hash TEXT NOT NULL UNIQUE,
+                    mascara TEXT NOT NULL,
+                    frequencia TEXT NOT NULL,
+                    email_alerta BOOLEAN NOT NULL DEFAULT FALSE,
+                    whatsapp_alerta BOOLEAN NOT NULL DEFAULT FALSE,
+                    status TEXT NOT NULL,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )""")
+                cur.execute("ALTER TABLE radar_items ADD COLUMN IF NOT EXISTS whatsapp_cipher TEXT")
+                cur.execute("ALTER TABLE radar_items ADD COLUMN IF NOT EXISTS whatsapp_mask TEXT")
+                cur.execute("ALTER TABLE radar_items ADD COLUMN IF NOT EXISTS email_cipher TEXT")
+                cur.execute("ALTER TABLE radar_items ADD COLUMN IF NOT EXISTS email_mask TEXT")
+                cur.execute("""CREATE TABLE IF NOT EXISTS audit_log(
+                    id BIGSERIAL PRIMARY KEY,
+                    action TEXT NOT NULL,
+                    entity_type TEXT NOT NULL,
+                    entity_id TEXT,
+                    details TEXT,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )""")
 
 def audit(action,entity_type,entity_id="",details=""):
     if not db_ready(): return
@@ -410,6 +435,9 @@ def list_radar_items():
 
 @app.on_event("startup")
 def startup():
+    if len(SESSION_SECRET.encode()) < 32:
+        raise RuntimeError("SESSION_SECRET deve ter pelo menos 32 bytes")
+    otp_service().initialize()
     init_db()
 
 @app.middleware("http")
@@ -518,32 +546,47 @@ def health():
 @app.get("/",response_class=HTMLResponse)
 def login(request:Request):
     if auth(request): return RedirectResponse("/painel",303)
-    return page(f"""<section class="card"><div class="brand">PORTICALLY HUB · MÓDULO PROCESSOS</div><h1>Acesso protegido</h1><div class="chips"><span class="chip green">v{APP_VERSION}</span><span class="chip">{UPDATE_LABEL}</span></div><p>Informe o e-mail autorizado. Um código temporário será enviado antes de liberar os dados processuais.</p><form method="post" action="/solicitar-codigo"><label>E-mail</label><input name="email" type="email" required autocomplete="email"><button>Enviar código de acesso</button></form></section>""")
+    result=page(f"""<section class="card"><div class="brand">PORTICALLY HUB · MÓDULO PROCESSOS</div><h1>Acesso protegido</h1><div class="chips"><span class="chip green">v{APP_VERSION}</span><span class="chip">{UPDATE_LABEL}</span></div><p>Informe o e-mail autorizado. Um código temporário será enviado antes de liberar os dados processuais.</p><form method="post" action="/solicitar-codigo"><label>E-mail</label><input name="email" type="email" required autocomplete="email" maxlength="254"><button>Enviar código de acesso</button></form></section>""")
+    if not otp_browser(request):
+        result.set_cookie(OTP_BROWSER_COOKIE,secrets.token_urlsafe(32),httponly=True,secure=True,samesite="strict",max_age=86400)
+    return result
 
 @app.post("/solicitar-codigo",response_class=HTMLResponse)
-def solicitar(email:str=Form(...)):
-    email=email.strip().lower()
-    if email!=AUTHORIZED_EMAIL:
-        return page('<section class="card"><h1>Acesso não autorizado</h1><p>Este e-mail não possui autorização.</p><a href="/">Voltar</a></section>')
-    code=f"{secrets.randbelow(1_000_000):06d}"
-    OTP_STORE[email]={"hash":hash_code(email,code),"exp":int(time.time())+OTP_TTL,"tries":0}
-    try: send_otp(email,code)
-    except Exception as e:
-        print(f"ERRO_ENVIO_OTP: {type(e).__name__}: {e}",flush=True); OTP_STORE.pop(email,None)
-        return page('<section class="card"><h1>Falha no envio</h1><p>Não foi possível enviar o código.</p><a href="/">Voltar</a></section>')
-    return page(f"""<section class="card"><h1>Digite o código</h1><p>Enviamos um código para <b>{esc(email)}</b>.</p><form method="post" action="/validar-codigo"><input type="hidden" name="email" value="{esc(email)}"><label>Código de 6 dígitos</label><input name="code" minlength="6" maxlength="6" required><button>Entrar</button></form></section>""")
+def solicitar(request:Request,email:str=Form(...,max_length=254)):
+    browser=otp_browser(request)
+    if not browser or not otp_origin_ok(request):
+        return otp_problem("Reabra a página de acesso para continuar.")
+    try:
+        result=otp_service().request(email,browser,otp_client(request),send_otp)
+    except Exception:
+        print("OTP_STORAGE_UNAVAILABLE",flush=True)
+        return otp_problem("Acesso temporariamente indisponível. Tente novamente mais tarde.",503)
+    if result.status=="limited":
+        return otp_problem("Aguarde antes de solicitar outro código.",429,result.retry_after)
+    if result.status=="delivery_failed":
+        return otp_problem("Não foi possível confirmar o envio. Aguarde antes de tentar novamente.",503)
+    # Identical prompt for unauthorized email; no code is sent or session granted.
+    challenge=result.challenge_id or str(uuid.uuid4())
+    return otp_form(email,challenge)
 
 @app.post("/validar-codigo")
-def validar(response:Response,email:str=Form(...),code:str=Form(...)):
-    email=email.strip().lower(); rec=OTP_STORE.get(email)
-    if not rec or rec["exp"]<int(time.time()) or rec["tries"]>=5:
-        return page('<section class="card"><h1>Código inválido ou expirado</h1><a href="/">Solicitar novo</a></section>')
-    rec["tries"]+=1
-    if not hmac.compare_digest(rec["hash"],hash_code(email,code.strip())):
-        return page('<section class="card"><h1>Código inválido</h1><a href="/">Tentar novamente</a></section>')
-    OTP_STORE.pop(email,None)
+def validar(request:Request,email:str=Form(...,max_length=254),code:str=Form(...,max_length=64),challenge:str=Form("",max_length=64)):
+    browser=otp_browser(request)
+    if not browser or not otp_origin_ok(request):
+        return otp_problem("Reabra a página de acesso para continuar.")
+    try:
+        result=otp_service().verify(email,challenge,code.strip(),browser,otp_client(request))
+    except Exception:
+        print("OTP_STORAGE_UNAVAILABLE",flush=True)
+        return otp_problem("Acesso temporariamente indisponível. Tente novamente mais tarde.",503)
+    if result.status=="limited":
+        return otp_problem("Aguarde antes de tentar novamente.",429,result.retry_after)
+    if result.status!="verified":
+        response=otp_form(email,challenge,"Código inválido ou expirado. Confira o código ou solicite outro.")
+        response.status_code=400
+        return response
     r=RedirectResponse("/painel",303)
-    r.set_cookie("portically_processos_session",make_session(email),httponly=True,secure=True,samesite="strict",max_age=SESSION_TTL)
+    r.set_cookie("portically_processos_session",make_session(AUTHORIZED_EMAIL),httponly=True,secure=True,samesite="strict",max_age=SESSION_TTL)
     return r
 
 @app.get("/painel",response_class=HTMLResponse)
@@ -700,3 +743,4 @@ def salvar_validacao(cnj:str,request:Request,
 @app.post("/sair")
 def sair():
     r=RedirectResponse("/",303); r.delete_cookie("portically_processos_session"); return r
+

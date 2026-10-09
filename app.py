@@ -1,13 +1,15 @@
 import os, time, secrets, hashlib, hmac, html, re
 from datetime import datetime, timezone, timedelta
+from case_store import CaseStore, case_context, CaseMapping, case_fragment, case_title
 import resend
 import psycopg
 from cryptography.fernet import Fernet
 from fastapi import FastAPI, Form, Request, Response
+from starlette.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse, RedirectResponse, PlainTextResponse
 
-APP_VERSION="1.3.0"
-UPDATE_LABEL="Atualização 20 · V20"
+APP_VERSION="1.3.2"
+UPDATE_LABEL="Atualização 22 · V22"
 AUTHORIZED_EMAIL=os.environ.get("AUTHORIZED_EMAIL","").strip().lower()
 SESSION_SECRET=os.environ.get("SESSION_SECRET","")
 RESEND_API_KEY=os.environ.get("RESEND_API_KEY","").strip()
@@ -23,16 +25,9 @@ VALIDATION={"cnj":False,"tribunal":False,"partes":False,"vinculo":False,"documen
 
 app=FastAPI(title="Portically Processos",docs_url=None,redoc_url=None)
 
-MAIN={
- "cnj":"0000678-55.2024.5.07.0001","court":"TRT-7","unit":"1ª Vara do Trabalho de Fortaleza/CE",
- "phase":"Execução","source":"PJe / TRT-7","sync":"Aguardando validação humana"
-}
-RELATED={
- "cnj":"0000869-21.2026.5.21.0008","court":"TRT-21","unit":"8ª Vara do Trabalho de Natal/RN",
- "kind":"Carta Precatória","class":"CartPrecCiv","purpose":"Citação","source":"PJe / TRT-21",
- "origin":"0000678-55.2024.5.07.0001","sync":"Aguardando validação humana"
-}
-TITLE="Francisco Fábio Dias da Silva x Portically Tecnologia Ltda. e outros"
+
+MAIN=CaseMapping("main")
+RELATED=CaseMapping("related")
 
 def esc(v): return html.escape(str(v))
 
@@ -414,7 +409,20 @@ def startup():
 
 @app.middleware("http")
 async def security_headers(request,call_next):
-    response=await call_next(request)
+    token=None
+    try:
+        if auth(request) and (request.url.path in {"/painel", "/processos", "/movimentacoes"} or request.url.path.startswith("/processos/")):
+            try:
+                bundle=await run_in_threadpool(lambda: CaseStore(DATABASE_URL, DATA_ENCRYPTION_KEY).load())
+            except Exception:
+                response=HTMLResponse("Dados processuais temporariamente indisponíveis. Contate a administração.",status_code=503)
+            else:
+                token=case_context.set(bundle)
+                response=await call_next(request)
+        else:
+            response=await call_next(request)
+    finally:
+        if token is not None: case_context.reset(token)
     response.headers["X-Content-Type-Options"]="nosniff"
     response.headers["X-Frame-Options"]="DENY"
     response.headers["Referrer-Policy"]="no-referrer"
@@ -450,56 +458,27 @@ def validation_status():
     return "Aguardando validação humana",done,"status-pend"
 
 def validation_html():
-    status,done,css=validation_status()
-    pct=int(done/6*100)
-    checked=lambda k: "checked" if VALIDATION.get(k) else ""
-    return f"""<div class="notice"><b>Como validar:</b> confira cada item diretamente na fonte oficial. Marque somente o que você confirmou. Você pode salvar parcialmente e continuar depois.</div>
-<div class="proc"><div class="top"><div><h2>Validação manual do caso</h2><p class="{css}"><b>{status}</b> · {done} de 6 itens confirmados</p></div><div class="version-inline">{pct}% concluído</div></div>
-<div class="progress"><i style="width:{pct}%"></i></div>
-<form method="post" action="/processos/{MAIN["cnj"]}/validar">
-<div class="validate-card"><div class="step"><div class="stepn">1</div><div><h3>Número CNJ</h3><div class="cnj">{MAIN["cnj"]}</div><div class="help">Confira se o número aparece exatamente igual na fonte oficial do TRT-7. Não aceite correspondência aproximada.</div></div><label class="checkrow"><input type="checkbox" name="cnj" {checked("cnj")}> Confirmado</label></div></div>
-<div class="validate-card"><div class="step"><div class="stepn">2</div><div><h3>Tribunal e Vara</h3><p><b>{MAIN["court"]}</b> · {MAIN["unit"]}</p><div class="help">Confirme tribunal, cidade e unidade judiciária no cadastro oficial do processo.</div></div><label class="checkrow"><input type="checkbox" name="tribunal" {checked("tribunal")}> Confirmado</label></div></div>
-<div class="validate-card"><div class="step"><div class="stepn">3</div><div><h3>Partes</h3><p>Francisco Fábio Dias da Silva × Portically Tecnologia Ltda. e outros</p><div class="help">Confira nomes e posição processual das partes na fonte oficial.</div></div><label class="checkrow"><input type="checkbox" name="partes" {checked("partes")}> Confirmado</label></div></div>
-<div class="validate-card"><div class="step"><div class="stepn">4</div><div><h3>Processo relacionado</h3><div class="cnj">{RELATED["cnj"]}</div><p>{RELATED["court"]} · {RELATED["unit"]}</p><div class="help">Confirme que esta carta precatória está vinculada ao processo principal acima e que a finalidade é citação.</div></div><label class="checkrow"><input type="checkbox" name="vinculo" {checked("vinculo")}> Confirmado</label></div></div>
-<div class="validate-card"><div class="step"><div class="stepn">5</div><div><h3>Documento</h3><p>Mandado de Citação PJe-JT</p><div class="help">Compare o mandado com o documento oficial: número do processo, destinatário, data, ID/chave de acesso e conteúdo essencial.</div></div><label class="checkrow"><input type="checkbox" name="documento" {checked("documento")}> Confirmado</label></div></div>
-<div class="validate-card"><div class="step"><div class="stepn">6</div><div><h3>Prazo e ciência</h3><p>Prazo mencionado no mandado: <b>48 horas</b></p><label>Data da ciência/citação efetiva</label><input type="date" name="data_ciencia" value="{esc(VALIDATION.get("data_ciencia",""))}"><div class="help">Só marque como confirmado depois de verificar a data efetiva de ciência/citação. O sistema não calcula o vencimento automaticamente nesta etapa.</div></div><label class="checkrow"><input type="checkbox" name="prazo" {checked("prazo")}> Confirmado</label></div></div>
-<label>Observações da validação</label><textarea name="observacoes" placeholder="Ex.: conferido no PJe do TRT-7; carta precatória confirmada no TRT-21.">{esc(VALIDATION.get("observacoes",""))}</textarea>
-<div class="actions"><button type="submit">Salvar validação</button></div>
-</form>
-</div>
-<div class="section"><h2>Registro da validação</h2>
-<div class="grid"><div class="box"><div class="label">Status</div><div class="value {css}">{status}</div></div><div class="box"><div class="label">Última validação</div><div class="value">{esc(VALIDATION.get("validated_at") or "Ainda não realizada")}</div></div><div class="box"><div class="label">Usuário</div><div class="value">{esc(VALIDATION.get("validated_by") or "—")}</div></div></div></div>"""
+    status, done, css = validation_status()
+    pct = int(done / 6 * 100)
+    checked = lambda k: 'checked' if VALIDATION.get(k) else ''
+    return f"{case_fragment('000')}{css}{case_fragment('001')}{status}{case_fragment('002')}{done}{case_fragment('003')}{pct}{case_fragment('004')}{pct}{case_fragment('005')}{MAIN['cnj']}{case_fragment('006')}{MAIN['cnj']}{case_fragment('007')}{checked('cnj')}{case_fragment('008')}{MAIN['court']}{case_fragment('009')}{MAIN['unit']}{case_fragment('010')}{checked('tribunal')}{case_fragment('011')}{checked('partes')}{case_fragment('012')}{RELATED['cnj']}{case_fragment('013')}{RELATED['court']}{case_fragment('014')}{RELATED['unit']}{case_fragment('015')}{checked('vinculo')}{case_fragment('016')}{checked('documento')}{case_fragment('017')}{esc(VALIDATION.get('data_ciencia', ''))}{case_fragment('018')}{checked('prazo')}{case_fragment('019')}{esc(VALIDATION.get('observacoes', ''))}{case_fragment('020')}{css}{case_fragment('021')}{status}{case_fragment('022')}{esc(VALIDATION.get('validated_at') or 'Ainda não realizada')}{case_fragment('023')}{esc(VALIDATION.get('validated_by') or '—')}{case_fragment('024')}"
 
 def tab_content(tab):
-    if tab=="validacao":
+    if tab == 'validacao':
         return validation_html()
-    if tab=="movimentacoes":
-        return f"""<div class="notice">Eventos abaixo foram extraídos dos documentos enviados. A cronologia oficial completa ainda depende de sincronização.</div>
-<div class="timeline">
-<div class="event"><h3>Processo principal em execução</h3><p><b>{MAIN["court"]} · {MAIN["cnj"]}</b></p><p>O mandado vinculado informa débito remanescente e referência ao processo principal em Fortaleza/CE.</p><span class="chip amber">Extraído do documento enviado</span></div>
-<div class="event"><h3>Carta Precatória no TRT-21</h3><p><b>{RELATED["cnj"]}</b></p><p>Carta destinada ao cumprimento de citação em Natal/RN.</p><span class="chip amber">Extraído do mandado enviado</span></div>
-<div class="event"><h3>Mandado de citação identificado</h3><p>Há referência a prazo de 48 horas. O vencimento não será calculado sem validação da ciência/citação.</p><span class="chip amber">Aguardando validação oficial</span></div>
-</div>"""
-    if tab=="documentos":
-        return f"""<div class="notice">O sistema deverá guardar ID oficial, fonte, data de captura, PDF e hash de cada peça. O mandado já está catalogado; PDF oficial e hash permanecem pendentes.</div>
-<div class="proc"><span class="chip">MANDADO</span><h3 style="margin-top:10px">Mandado de Citação PJe-JT</h3><p>Processo: <span class="cnj">{RELATED["cnj"]}</span> · TRT-21</p>
-<div class="grid"><div class="box"><div class="label">Status</div><div class="value">Identificado nos documentos enviados</div></div><div class="box"><div class="label">Integridade</div><div class="value">PDF oficial + hash pendentes</div></div><div class="box"><div class="label">Fonte</div><div class="value">PJe / TRT-21</div></div></div></div>"""
-    if tab=="relacionados":
-        return f"""<div class="proc"><span class="chip green">PROCESSO PRINCIPAL</span><h3 style="margin-top:10px">{MAIN["cnj"]}</h3><p>{MAIN["court"]} · {MAIN["unit"]}</p></div>
-<div class="link">Vínculo: processo de origem → carta precatória</div>
-<div class="proc"><span class="chip">CARTA PRECATÓRIA</span><h3 style="margin-top:10px">{RELATED["cnj"]}</h3><p>{RELATED["court"]} · {RELATED["unit"]}</p>
-<div class="grid"><div class="box"><div class="label">Finalidade</div><div class="value">{RELATED["purpose"]}</div></div><div class="box"><div class="label">Classe</div><div class="value">{RELATED["class"]}</div></div><div class="box"><div class="label">Origem</div><div class="value cnj">{RELATED["origin"]}</div></div></div></div>"""
-    if tab=="prazos":
-        return """<div class="notice">O vencimento definitivo só será calculado após validação da data efetiva de ciência/citação e da regra de contagem.</div>
-<div class="box deadline"><div class="label">Mandado de Citação PJe-JT</div><div class="value">48 horas</div><p>Comprovar o pagamento do débito remanescente e, querendo, apresentar a medida processual indicada no mandado.</p><span class="chip amber">Início e vencimento ainda não validados</span></div>"""
-    if tab=="partes":
-        return """<div class="grid"><div class="box"><div class="label">Autor / Exequente</div><div class="value">Francisco Fábio Dias da Silva</div></div><div class="box"><div class="label">Réu / Executado</div><div class="value">Portically Tecnologia Ltda. e outros</div></div><div class="box"><div class="label">Destinatária indicada no mandado</div><div class="value">Fernanda Geroncio Pinheiro Dantas</div></div></div>"""
-    if tab=="historico":
-        return f"""<div class="grid"><div class="box"><span class="chip green">ATUAL</span><div class="label" style="margin-top:8px">Versão</div><div class="value">v{APP_VERSION} · {UPDATE_LABEL}</div><p>Abas funcionais, documentos, movimentações, histórico e identificação visual permanente da versão atual.</p></div>
-<div class="box"><div class="label">Versão anterior</div><div class="value">v1.2.9 · Atualização 19 · V19</div><p>Agrupamento do caso e vínculo entre processo principal e carta precatória.</p></div></div>"""
-    return f"""<div class="notice"><b>Leitura rápida:</b> Processo em fase de execução. Há uma carta precatória vinculada no TRT-21, em Natal/RN, destinada ao cumprimento de citação originada no processo principal de Fortaleza/CE.</div>
-<div class="grid"><div class="box"><div class="label">Processo principal</div><div class="value cnj">{MAIN["cnj"]}</div></div><div class="box"><div class="label">Tribunal</div><div class="value">{MAIN["court"]}</div><p>{MAIN["unit"]}</p></div><div class="box"><div class="label">Fase</div><div class="value">{MAIN["phase"]}</div></div><div class="box"><div class="label">Sincronização</div><div class="value">{validation_status()[0]}</div><p>{validation_status()[1]} de 6 itens confirmados</p><a class="btn" href="/processos/{MAIN["cnj"]}?tab=validacao">Iniciar validação</a></div></div>
-<div class="section"><h2>Entenda este processo</h2><div class="grid"><div class="box"><h3>Execução</h3><p>Fase em que o Judiciário busca o cumprimento da obrigação ou pagamento indicado no processo.</p></div><div class="box"><h3>Por que há um processo em Natal?</h3><p>O processo principal tramita em Fortaleza/CE. A carta precatória foi aberta no TRT-21 para cumprir uma diligência em Natal/RN.</p></div><div class="box"><h3>Carta Precatória</h3><p>É o instrumento usado para pedir a outro juízo que cumpra uma diligência fora da área do processo principal.</p></div></div></div>"""
+    if tab == 'movimentacoes':
+        return f"{case_fragment('025')}{MAIN['court']}{case_fragment('026')}{MAIN['cnj']}{case_fragment('027')}{RELATED['cnj']}{case_fragment('028')}"
+    if tab == 'documentos':
+        return f"{case_fragment('029')}{RELATED['cnj']}{case_fragment('030')}"
+    if tab == 'relacionados':
+        return f"{case_fragment('031')}{MAIN['cnj']}{case_fragment('032')}{MAIN['court']}{case_fragment('033')}{MAIN['unit']}{case_fragment('034')}{RELATED['cnj']}{case_fragment('035')}{RELATED['court']}{case_fragment('036')}{RELATED['unit']}{case_fragment('037')}{RELATED['purpose']}{case_fragment('038')}{RELATED['class']}{case_fragment('039')}{RELATED['origin']}{case_fragment('040')}"
+    if tab == 'prazos':
+        return case_fragment('041')
+    if tab == 'partes':
+        return case_fragment('042')
+    if tab == 'historico':
+        return f"{case_fragment('043')}{APP_VERSION}{case_fragment('044')}{UPDATE_LABEL}{case_fragment('045')}"
+    return f"{case_fragment('046')}{MAIN['cnj']}{case_fragment('047')}{MAIN['court']}{case_fragment('048')}{MAIN['unit']}{case_fragment('049')}{MAIN['phase']}{case_fragment('050')}{validation_status()[0]}{case_fragment('051')}{validation_status()[1]}{case_fragment('052')}{MAIN['cnj']}{case_fragment('053')}"
 
 @app.get("/health")
 def health():
@@ -560,7 +539,7 @@ def painel(request:Request):
 <a class="dash-card" href="/alertas"><div class="dash-label">Alertas</div><div class="dash-num">{n["alertas"]}</div><div class="dash-link">Ver alertas →</div></a>
 <a class="dash-card" href="/processos/{MAIN["cnj"]}?tab=validacao"><div class="dash-label">Validações pendentes</div><div class="dash-num">{n["validacoes"]}</div><div class="dash-link">Continuar validação →</div></a>
 </div>
-<div class="section"><h2>Resumo atual</h2><div class="grid"><div class="box"><div class="label">Caso em acompanhamento</div><div class="value">{TITLE}</div><p class="cnj">{MAIN["cnj"]}</p></div><div class="box"><div class="label">Status da validação</div><div class="value {css}">{status}</div><p>{done} de 6 itens confirmados</p></div><div class="box"><div class="label">Radar processual</div><div class="value">Ainda não configurado</div><p>Cadastre CPF/CNPJ para preparar a busca de novos processos nas fontes compatíveis.</p></div></div></div>
+<div class="section"><h2>Resumo atual</h2><div class="grid"><div class="box"><div class="label">Caso em acompanhamento</div><div class="value">{case_title()}</div><p class="cnj">{MAIN["cnj"]}</p></div><div class="box"><div class="label">Status da validação</div><div class="value {css}">{status}</div><p>{done} de 6 itens confirmados</p></div><div class="box"><div class="label">Radar processual</div><div class="value">Ainda não configurado</div><p>Cadastre CPF/CNPJ para preparar a busca de novos processos nas fontes compatíveis.</p></div></div></div>
 <div class="actions"><form method="post" action="/sair"><button>Sair</button></form></div></section>"""
     return page(body,"Painel · Portically Processos")
 
@@ -660,7 +639,7 @@ def alertas(request:Request):
 def processos(request:Request):
     if not auth(request): return RedirectResponse("/",303)
     return page(f"""<section class="card">{app_header("Meus Processos","Acompanhe cada caso com seus processos relacionados, documentos e prazos em um só lugar.")}
-<div class="proc"><div class="chips"><span class="chip">JUSTIÇA DO TRABALHO</span><span class="chip amber">{MAIN["phase"].upper()}</span><span class="chip">1 VÍNCULO</span></div><h2 class="case-title">{TITLE}</h2><div class="cnj">{MAIN["cnj"]}</div><div class="case-footer"><div><div class="label">ORIGEM</div><p class="case-location">{MAIN["court"]} · {MAIN["unit"]}</p></div><a class="btn" href="/processos/{MAIN["cnj"]}?tab=resumo">Ver detalhes do caso</a></div></div><div class="actions"><form method="post" action="/sair"><button>Sair</button></form></div></section>""")
+<div class="proc"><div class="chips"><span class="chip">JUSTIÇA DO TRABALHO</span><span class="chip amber">{MAIN["phase"].upper()}</span><span class="chip">1 VÍNCULO</span></div><h2 class="case-title">{case_title()}</h2><div class="cnj">{MAIN["cnj"]}</div><div class="case-footer"><div><div class="label">ORIGEM</div><p class="case-location">{MAIN["court"]} · {MAIN["unit"]}</p></div><a class="btn" href="/processos/{MAIN["cnj"]}?tab=resumo">Ver detalhes do caso</a></div></div><div class="actions"><form method="post" action="/sair"><button>Sair</button></form></div></section>""")
 
 @app.get("/processos/{cnj}",response_class=HTMLResponse)
 def detalhe(cnj:str,request:Request,tab:str="resumo"):
@@ -669,7 +648,7 @@ def detalhe(cnj:str,request:Request,tab:str="resumo"):
         return page('<section class="card"><h1>Processo não encontrado</h1><a class="btn" href="/processos">Voltar</a></section>')
     valid={"resumo","movimentacoes","documentos","relacionados","prazos","partes","validacao","historico"}
     if tab not in valid: tab="resumo"
-    body=f"""<section class="card"><div class="top"><div><div class="brand">PORTICALLY HUB · PROCESSOS</div><h1>{TITLE}</h1><div class="chips"><span class="chip">TRABALHISTA</span><span class="chip amber">{MAIN["phase"].upper()}</span><span class="chip">1 PROCESSO VINCULADO</span></div></div><div class="chips"><span class="chip green">v{APP_VERSION}</span><span class="chip">{UPDATE_LABEL}</span></div></div>
+    body=f"""<section class="card"><div class="top"><div><div class="brand">PORTICALLY HUB · PROCESSOS</div><h1>{case_title()}</h1><div class="chips"><span class="chip">TRABALHISTA</span><span class="chip amber">{MAIN["phase"].upper()}</span><span class="chip">1 PROCESSO VINCULADO</span></div></div><div class="chips"><span class="chip green">v{APP_VERSION}</span><span class="chip">{UPDATE_LABEL}</span></div></div>
 {main_nav()}
 {tabs(tab)}{tab_content(tab)}
 <div class="section"><h2>Controle de integridade</h2><div class="grid"><div class="box"><div class="label">Fonte oficial</div><div class="value">Obrigatória</div></div><div class="box"><div class="label">Correspondência CNJ</div><div class="value">Exata</div></div><div class="box"><div class="label">Documentos</div><div class="value">ID + fonte + captura + hash</div></div><div class="box"><div class="label">Status técnico</div><div class="value">Aguardando validação humana</div></div></div></div>

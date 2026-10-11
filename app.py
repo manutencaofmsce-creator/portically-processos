@@ -6,8 +6,8 @@ from cryptography.fernet import Fernet
 from fastapi import FastAPI, Form, Request, Response
 from fastapi.responses import HTMLResponse, RedirectResponse, PlainTextResponse
 
-APP_VERSION="1.3.0"
-UPDATE_LABEL="Atualização 20 · V20"
+APP_VERSION="1.4.0"
+UPDATE_LABEL="Atualização 21 · V21"
 AUTHORIZED_EMAIL=os.environ.get("AUTHORIZED_EMAIL","").strip().lower()
 SESSION_SECRET=os.environ.get("SESSION_SECRET","")
 RESEND_API_KEY=os.environ.get("RESEND_API_KEY","").strip()
@@ -20,6 +20,7 @@ OTP_TTL=600
 SESSION_TTL=28800
 OTP_STORE={}
 VALIDATION={"cnj":False,"tribunal":False,"partes":False,"vinculo":False,"documento":False,"prazo":False,"data_ciencia":"","observacoes":"","validated_at":"","validated_by":""}
+NEW_CASE_VALIDATION={"metadata":False,"decision":False,"status":False,"next_steps":False,"document_link":False,"observacoes":"","validated_at":"","validated_by":""}
 
 app=FastAPI(title="Portically Processos",docs_url=None,redoc_url=None)
 
@@ -33,6 +34,27 @@ RELATED={
  "origin":"0000678-55.2024.5.07.0001","sync":"Aguardando validação humana"
 }
 TITLE="Francisco Fábio Dias da Silva x Portically Tecnologia Ltda. e outros"
+
+NEW_CASE={
+ "cnj":"0800534-37.2025.8.20.5001",
+ "title":"Maxwell Geroncio de Moura · Procedimento Comum Cível",
+ "court":"TJRN",
+ "unit":"7ª Vara Cível da Comarca de Natal",
+ "class":"Procedimento Comum Cível",
+ "claimant":"Maxwell Geroncio de Moura",
+ "source":"PJe / TJRN",
+ "decision_at":"29/09/2026 16:03:21",
+ "judge":"Eduardo André Dantas Silva",
+ "decision_id":"202125499",
+ "document_id":"26092916032157800000187290537",
+ "official_url":"https://pje1g.tjrn.jus.br:443/pje/Processo/ConsultaDocumento/listView.seam?x=26092916032157800000187290537",
+ "document_sha256":"461b78eab2e76e3f3bb08c3941ca77d19bd05cae6762fba555328e4cc9776f36",
+ "operational_status":"Aguardando comprovação de custas da reconvenção",
+ "status_basis":"Classificação operacional baseada exclusivamente na decisão de 29/09/2026; não substitui a situação oficial no PJe.",
+ "official_summary":"A prova testemunhal já havia sido deferida para ambas as partes e a decisão de saneamento foi declarada estável.",
+ "next_step":"A parte ré/reconvinte deve comprovar, em 15 dias, o recolhimento das custas processuais da reconvenção. Depois do prazo, os autos devem voltar conclusos para decisão.",
+ "deadline_note":"O vencimento não foi calculado porque o documento não informa a data de ciência/intimação.",
+}
 
 def esc(v): return html.escape(str(v))
 
@@ -384,6 +406,85 @@ def init_db():
                 details TEXT,
                 created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             )""")
+            cur.execute("""CREATE TABLE IF NOT EXISTS process_records(
+                cnj TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                court TEXT NOT NULL,
+                unit_name TEXT NOT NULL,
+                class_name TEXT NOT NULL,
+                claimant TEXT,
+                source TEXT NOT NULL,
+                operational_status TEXT NOT NULL,
+                status_basis TEXT NOT NULL,
+                official_summary TEXT NOT NULL,
+                latest_decision_at TEXT NOT NULL,
+                judge_name TEXT NOT NULL,
+                next_step TEXT NOT NULL,
+                deadline_note TEXT NOT NULL,
+                human_validation_status TEXT NOT NULL DEFAULT 'Aguardando validação humana',
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )""")
+            cur.execute("""CREATE TABLE IF NOT EXISTS process_documents(
+                id TEXT PRIMARY KEY,
+                process_cnj TEXT NOT NULL,
+                decision_id TEXT,
+                document_type TEXT NOT NULL,
+                document_at TEXT NOT NULL,
+                signer TEXT NOT NULL,
+                source TEXT NOT NULL,
+                official_url TEXT NOT NULL,
+                sha256 TEXT NOT NULL UNIQUE,
+                capture_status TEXT NOT NULL,
+                storage_status TEXT NOT NULL,
+                validation_status TEXT NOT NULL DEFAULT 'Aguardando validação humana',
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )""")
+            cur.execute("""CREATE TABLE IF NOT EXISTS process_validations(
+                process_cnj TEXT PRIMARY KEY,
+                metadata_ok BOOLEAN NOT NULL DEFAULT FALSE,
+                decision_ok BOOLEAN NOT NULL DEFAULT FALSE,
+                status_ok BOOLEAN NOT NULL DEFAULT FALSE,
+                next_steps_ok BOOLEAN NOT NULL DEFAULT FALSE,
+                document_link_ok BOOLEAN NOT NULL DEFAULT FALSE,
+                notes TEXT NOT NULL DEFAULT '',
+                validated_at TIMESTAMPTZ,
+                validated_by TEXT,
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )""")
+            cur.execute("""INSERT INTO process_records(
+                cnj,title,court,unit_name,class_name,claimant,source,operational_status,
+                status_basis,official_summary,latest_decision_at,judge_name,next_step,deadline_note
+            ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+            ON CONFLICT (cnj) DO UPDATE SET
+                title=EXCLUDED.title,court=EXCLUDED.court,unit_name=EXCLUDED.unit_name,
+                class_name=EXCLUDED.class_name,claimant=EXCLUDED.claimant,source=EXCLUDED.source,
+                operational_status=EXCLUDED.operational_status,status_basis=EXCLUDED.status_basis,
+                official_summary=EXCLUDED.official_summary,latest_decision_at=EXCLUDED.latest_decision_at,
+                judge_name=EXCLUDED.judge_name,next_step=EXCLUDED.next_step,
+                deadline_note=EXCLUDED.deadline_note,updated_at=NOW()""",
+                (NEW_CASE["cnj"],NEW_CASE["title"],NEW_CASE["court"],NEW_CASE["unit"],
+                 NEW_CASE["class"],NEW_CASE["claimant"],NEW_CASE["source"],
+                 NEW_CASE["operational_status"],NEW_CASE["status_basis"],NEW_CASE["official_summary"],
+                 NEW_CASE["decision_at"],NEW_CASE["judge"],NEW_CASE["next_step"],NEW_CASE["deadline_note"]))
+            cur.execute("""INSERT INTO process_documents(
+                id,process_cnj,decision_id,document_type,document_at,signer,source,
+                official_url,sha256,capture_status,storage_status
+            ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+            ON CONFLICT (id) DO UPDATE SET
+                process_cnj=EXCLUDED.process_cnj,decision_id=EXCLUDED.decision_id,
+                document_type=EXCLUDED.document_type,document_at=EXCLUDED.document_at,
+                signer=EXCLUDED.signer,source=EXCLUDED.source,official_url=EXCLUDED.official_url,
+                sha256=EXCLUDED.sha256,capture_status=EXCLUDED.capture_status,
+                storage_status=EXCLUDED.storage_status,updated_at=NOW()""",
+                (NEW_CASE["document_id"],NEW_CASE["cnj"],NEW_CASE["decision_id"],"Decisão",
+                 NEW_CASE["decision_at"],NEW_CASE["judge"],NEW_CASE["source"],
+                 NEW_CASE["official_url"],NEW_CASE["document_sha256"],
+                 "PDF fornecido pelo usuário; data de captura não informada no documento",
+                 "Metadados, vínculo e hash registrados; arquivo não publicado no repositório público"))
+            cur.execute("""INSERT INTO process_validations(process_cnj)
+                           VALUES (%s) ON CONFLICT (process_cnj) DO NOTHING""",(NEW_CASE["cnj"],))
 
 def audit(action,entity_type,entity_id="",details=""):
     if not db_ready(): return
@@ -407,6 +508,33 @@ def list_radar_items():
         items.append({"id":r[0],"tipo":r[1],"nome":r[2],"mascara":r[3],"frequencia":r[4],
                       "canais":", ".join(canais) if canais else "Somente sistema","status":r[7],"created_at":r[8],"whatsapp":r[9] or "—","email":r[10] or "—"})
     return items
+
+def load_new_case_validation():
+    state=NEW_CASE_VALIDATION.copy()
+    if not db_ready():
+        return state
+    try:
+        with db_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""SELECT metadata_ok,decision_ok,status_ok,next_steps_ok,document_link_ok,
+                                      notes,validated_at,validated_by
+                               FROM process_validations WHERE process_cnj=%s""",(NEW_CASE["cnj"],))
+                row=cur.fetchone()
+        if row:
+            state.update({"metadata":row[0],"decision":row[1],"status":row[2],
+                          "next_steps":row[3],"document_link":row[4],"observacoes":row[5] or "",
+                          "validated_at":row[6].astimezone(timezone(timedelta(hours=-3))).strftime("%d/%m/%Y às %H:%M") if row[6] else "",
+                          "validated_by":row[7] or ""})
+    except Exception as e:
+        print(f"PROCESS_VALIDATION_READ_ERROR: {type(e).__name__}", flush=True)
+    return state
+
+def new_case_validation_status(state=None):
+    state=state or load_new_case_validation()
+    done=sum(1 for key in ("metadata","decision","status","next_steps","document_link") if state.get(key))
+    if done==5: return "Validado manualmente",done,"status-ok"
+    if done>0: return "Parcialmente validado",done,"status-part"
+    return "Aguardando validação humana",done,"status-pend"
 
 @app.on_event("startup")
 def startup():
@@ -434,13 +562,15 @@ def dashboard_counts():
                     radar_count=int(cur.fetchone()[0])
         except Exception as e:
             print(f"RADAR_COUNT_ERROR: {type(e).__name__}", flush=True)
-    return {"processos":1,"cpf_cnpj":radar_count,"movimentacoes":0,"novos_processos":0,"alertas":0,"validacoes":1 if validation_status()[1] < 6 else 0}
+    pending_validations=(1 if validation_status()[1] < 6 else 0)+(1 if new_case_validation_status()[1] < 5 else 0)
+    return {"processos":2,"cpf_cnpj":radar_count,"movimentacoes":0,"novos_processos":0,"alertas":0,"validacoes":pending_validations}
 
-def tabs(active):
+def tabs(active,cnj=None):
+    target=cnj or MAIN["cnj"]
     items=[("resumo","Resumo"),("movimentacoes","Movimentações"),("documentos","Documentos"),
            ("relacionados","Processos relacionados"),("prazos","Prazos"),("partes","Partes"),("validacao","Validação"),("historico","Histórico")]
     return '<div class="tabs">'+''.join(
-      f'<a class="tab {"active" if k==active else ""}" href="/processos/{MAIN["cnj"]}?tab={k}">{label}</a>'
+      f'<a class="tab {"active" if k==active else ""}" href="/processos/{target}?tab={k}">{label}</a>'
       for k,label in items)+'</div>'
 
 def validation_status():
@@ -469,6 +599,54 @@ def validation_html():
 </div>
 <div class="section"><h2>Registro da validação</h2>
 <div class="grid"><div class="box"><div class="label">Status</div><div class="value {css}">{status}</div></div><div class="box"><div class="label">Última validação</div><div class="value">{esc(VALIDATION.get("validated_at") or "Ainda não realizada")}</div></div><div class="box"><div class="label">Usuário</div><div class="value">{esc(VALIDATION.get("validated_by") or "—")}</div></div></div></div>"""
+
+def new_case_validation_html():
+    state=load_new_case_validation()
+    status,done,css=new_case_validation_status(state)
+    pct=int(done/5*100)
+    checked=lambda key: "checked" if state.get(key) else ""
+    persistence="PostgreSQL" if db_ready() else "memória temporária (banco não configurado)"
+    return f"""<div class="notice"><b>Validação humana obrigatória:</b> marque apenas os itens conferidos diretamente no PJe/TJRN e no PDF oficial. A classificação operacional do sistema não substitui o andamento oficial.</div>
+<div class="proc"><div class="top"><div><h2>Validação da ficha e do documento</h2><p class="{css}"><b>{status}</b> · {done} de 5 itens confirmados</p></div><div class="version-inline">{pct}% concluído</div></div>
+<div class="progress"><i style="width:{pct}%"></i></div>
+<form method="post" action="/processos/{NEW_CASE["cnj"]}/validar">
+<div class="validate-card"><div class="step"><div class="stepn">1</div><div><h3>Metadados oficiais</h3><p><span class="cnj">{NEW_CASE["cnj"]}</span> · {NEW_CASE["class"]} · {NEW_CASE["unit"]}</p><div class="help">Confira número CNJ, classe, unidade e requerente no cadastro oficial.</div></div><label class="checkrow"><input type="checkbox" name="metadata" {checked("metadata")}> Confirmado</label></div></div>
+<div class="validate-card"><div class="step"><div class="stepn">2</div><div><h3>Decisão de 29/09/2026</h3><p>Documento {NEW_CASE["document_id"]}, assinado por {NEW_CASE["judge"]} às 16:03:21.</p><div class="help">Compare data, assinatura, número da decisão e conteúdo essencial com o PDF.</div></div><label class="checkrow"><input type="checkbox" name="decision" {checked("decision")}> Confirmado</label></div></div>
+<div class="validate-card"><div class="step"><div class="stepn">3</div><div><h3>Status operacional</h3><p>{NEW_CASE["operational_status"]}</p><div class="help">Esta é uma classificação interna baseada na decisão, não um andamento oficial autônomo.</div></div><label class="checkrow"><input type="checkbox" name="status" {checked("status")}> Confirmado</label></div></div>
+<div class="validate-card"><div class="step"><div class="stepn">4</div><div><h3>Próximos passos</h3><p>{NEW_CASE["next_step"]}</p><div class="help">Não confirme vencimento: a data de ciência/intimação não consta no documento.</div></div><label class="checkrow"><input type="checkbox" name="next_steps" {checked("next_steps")}> Confirmado</label></div></div>
+<div class="validate-card"><div class="step"><div class="stepn">5</div><div><h3>Vínculo documental</h3><p>ID {NEW_CASE["document_id"]} · SHA-256 <span class="cnj">{NEW_CASE["document_sha256"]}</span></p><div class="help">Abra a fonte oficial e confirme que o documento corresponde a este processo e a este hash.</div></div><label class="checkrow"><input type="checkbox" name="document_link" {checked("document_link")}> Confirmado</label></div></div>
+<label>Observações da validação</label><textarea name="observacoes" placeholder="Registre a fonte consultada e qualquer divergência encontrada.">{esc(state.get("observacoes",""))}</textarea>
+<div class="actions"><button type="submit">Salvar validação</button><a class="btn" href="{esc(NEW_CASE["official_url"])}" target="_blank" rel="noopener noreferrer">Abrir documento no PJe</a></div>
+</form></div>
+<div class="section"><h2>Registro da validação</h2><div class="grid"><div class="box"><div class="label">Status</div><div class="value {css}">{status}</div></div><div class="box"><div class="label">Última validação</div><div class="value">{esc(state.get("validated_at") or "Ainda não realizada")}</div></div><div class="box"><div class="label">Usuário</div><div class="value">{esc(state.get("validated_by") or "—")}</div></div><div class="box"><div class="label">Persistência</div><div class="value">{persistence}</div></div></div></div>"""
+
+def new_case_tab_content(tab):
+    state=load_new_case_validation()
+    status,done,css=new_case_validation_status(state)
+    if tab=="validacao":
+        return new_case_validation_html()
+    if tab=="movimentacoes":
+        return f"""<div class="notice">A cronologia abaixo contém somente fatos presentes na decisão enviada. A movimentação completa depende de consulta ao PJe.</div>
+<div class="timeline"><div class="event"><h3>Decisão de saneamento anterior</h3><p>A decisão Num. 171200069 havia deferido prova testemunhal para ambas as partes, na ação principal e na reconvenção.</p><span class="chip amber">Referida na decisão enviada</span></div>
+<div class="event"><h3>Decisão de 29/09/2026</h3><p>A decisão de saneamento foi declarada estável. A parte ré/reconvinte foi intimada, por seu advogado, a comprovar em 15 dias o recolhimento das custas da reconvenção.</p><span class="chip">Documento {NEW_CASE["document_id"]}</span></div>
+<div class="event"><h3>Próximo ato previsto</h3><p>Depois do prazo, os autos devem voltar conclusos para decisão.</p><span class="chip amber">Ainda não confirmado no PJe</span></div></div>"""
+    if tab=="documentos":
+        return f"""<div class="notice">O PDF fornecido foi usado somente para registrar os dados abaixo. Ele não foi adicionado ao repositório público. A correspondência com a fonte oficial continua pendente de validação humana.</div>
+<div class="proc"><div class="top"><div><span class="chip">DECISÃO</span><h3 style="margin-top:10px">Decisão sobre prova e custas da reconvenção</h3><p>Processo: <span class="cnj">{NEW_CASE["cnj"]}</span> · {NEW_CASE["source"]}</p></div><span class="chip amber">{status.upper()}</span></div>
+<div class="grid"><div class="box"><div class="label">ID oficial</div><div class="value cnj">{NEW_CASE["document_id"]}</div></div><div class="box"><div class="label">Decisão</div><div class="value">Num. {NEW_CASE["decision_id"]}</div></div><div class="box"><div class="label">Data e assinatura</div><div class="value">{NEW_CASE["decision_at"]}</div><p>{NEW_CASE["judge"]}</p></div><div class="box"><div class="label">Fonte</div><div class="value">{NEW_CASE["source"]}</div></div></div>
+<div class="section"><div class="box"><div class="label">SHA-256 do PDF recebido</div><div class="value cnj">{NEW_CASE["document_sha256"]}</div><p>Data de captura: não informada no documento. Metadados e hash registrados; arquivo não publicado no repositório.</p></div></div>
+<div class="actions"><a class="btn" href="{esc(NEW_CASE["official_url"])}" target="_blank" rel="noopener noreferrer">Consultar documento oficial</a><a class="btn" href="/processos/{NEW_CASE["cnj"]}?tab=validacao">Validar vínculo documental</a></div></div>"""
+    if tab=="relacionados":
+        return """<div class="empty">Nenhum processo relacionado foi identificado no documento enviado. Não foram inferidos vínculos ausentes.</div>"""
+    if tab=="prazos":
+        return f"""<div class="notice">{NEW_CASE["deadline_note"]}</div><div class="box deadline"><div class="label">Providência determinada</div><div class="value">15 dias</div><p>Comprovar o recolhimento das custas processuais referentes à reconvenção.</p><span class="chip amber">Termo inicial e vencimento não informados no documento</span></div>"""
+    if tab=="partes":
+        return f"""<div class="grid"><div class="box"><div class="label">Requerente</div><div class="value">{NEW_CASE["claimant"]}</div></div><div class="box"><div class="label">Parte ré/reconvinte</div><div class="value">Nome não informado no documento enviado</div></div></div>"""
+    if tab=="historico":
+        return f"""<div class="grid"><div class="box"><span class="chip green">ATUAL</span><div class="label" style="margin-top:8px">Versão</div><div class="value">v{APP_VERSION} · {UPDATE_LABEL}</div><p>Inclusão persistente do processo, decisão, próximos passos, vínculo documental e validação humana.</p></div><div class="box"><div class="label">Origem da inclusão</div><div class="value">PDF fornecido pelo usuário</div><p>Somente dados presentes no documento foram cadastrados.</p></div></div>"""
+    return f"""<div class="notice"><b>Leitura rápida:</b> a decisão de 29/09/2026 manteve estável o saneamento e determinou que a parte ré/reconvinte comprovasse o recolhimento das custas da reconvenção antes da continuidade da produção de provas.</div>
+<div class="grid"><div class="box"><div class="label">Processo</div><div class="value cnj">{NEW_CASE["cnj"]}</div></div><div class="box"><div class="label">Classe</div><div class="value">{NEW_CASE["class"]}</div></div><div class="box"><div class="label">Unidade</div><div class="value">{NEW_CASE["court"]}</div><p>{NEW_CASE["unit"]}</p></div><div class="box"><div class="label">Status operacional</div><div class="value">{NEW_CASE["operational_status"]}</div><p>{NEW_CASE["status_basis"]}</p></div><div class="box"><div class="label">Validação</div><div class="value {css}">{status}</div><p>{done} de 5 itens confirmados</p><a class="btn" href="/processos/{NEW_CASE["cnj"]}?tab=validacao">Revisar ficha</a></div></div>
+<div class="section"><h2>Decisão mais recente no documento</h2><div class="proc"><h3>{NEW_CASE["decision_at"]} · {NEW_CASE["judge"]}</h3><p>{NEW_CASE["official_summary"]}</p><p><b>Próximo passo:</b> {NEW_CASE["next_step"]}</p><span class="chip amber">{NEW_CASE["deadline_note"]}</span></div></div>"""
 
 def tab_content(tab):
     if tab=="validacao":
@@ -560,7 +738,7 @@ def painel(request:Request):
 <a class="dash-card" href="/alertas"><div class="dash-label">Alertas</div><div class="dash-num">{n["alertas"]}</div><div class="dash-link">Ver alertas →</div></a>
 <a class="dash-card" href="/processos/{MAIN["cnj"]}?tab=validacao"><div class="dash-label">Validações pendentes</div><div class="dash-num">{n["validacoes"]}</div><div class="dash-link">Continuar validação →</div></a>
 </div>
-<div class="section"><h2>Resumo atual</h2><div class="grid"><div class="box"><div class="label">Caso em acompanhamento</div><div class="value">{TITLE}</div><p class="cnj">{MAIN["cnj"]}</p></div><div class="box"><div class="label">Status da validação</div><div class="value {css}">{status}</div><p>{done} de 6 itens confirmados</p></div><div class="box"><div class="label">Radar processual</div><div class="value">Ainda não configurado</div><p>Cadastre CPF/CNPJ para preparar a busca de novos processos nas fontes compatíveis.</p></div></div></div>
+<div class="section"><h2>Resumo atual</h2><div class="grid"><div class="box"><div class="label">Processos em acompanhamento</div><div class="value">2 fichas cadastradas</div><p class="cnj">{MAIN["cnj"]}</p><p class="cnj">{NEW_CASE["cnj"]}</p></div><div class="box"><div class="label">Status da validação do caso trabalhista</div><div class="value {css}">{status}</div><p>{done} de 6 itens confirmados</p></div><div class="box"><div class="label">Novo processo cível</div><div class="value">{new_case_validation_status()[0]}</div><p>{NEW_CASE["operational_status"]}</p></div><div class="box"><div class="label">Radar processual</div><div class="value">Ainda não configurado</div><p>Cadastre CPF/CNPJ para preparar a busca de novos processos nas fontes compatíveis.</p></div></div></div>
 <div class="actions"><form method="post" action="/sair"><button>Sair</button></form></div></section>"""
     return page(body,"Painel · Portically Processos")
 
@@ -660,15 +838,25 @@ def alertas(request:Request):
 def processos(request:Request):
     if not auth(request): return RedirectResponse("/",303)
     return page(f"""<section class="card">{app_header("Meus Processos","Acompanhe cada caso com seus processos relacionados, documentos e prazos em um só lugar.")}
-<div class="proc"><div class="chips"><span class="chip">JUSTIÇA DO TRABALHO</span><span class="chip amber">{MAIN["phase"].upper()}</span><span class="chip">1 VÍNCULO</span></div><h2 class="case-title">{TITLE}</h2><div class="cnj">{MAIN["cnj"]}</div><div class="case-footer"><div><div class="label">ORIGEM</div><p class="case-location">{MAIN["court"]} · {MAIN["unit"]}</p></div><a class="btn" href="/processos/{MAIN["cnj"]}?tab=resumo">Ver detalhes do caso</a></div></div><div class="actions"><form method="post" action="/sair"><button>Sair</button></form></div></section>""")
+<div class="proc"><div class="chips"><span class="chip">JUSTIÇA DO TRABALHO</span><span class="chip amber">{MAIN["phase"].upper()}</span><span class="chip">1 VÍNCULO</span></div><h2 class="case-title">{TITLE}</h2><div class="cnj">{MAIN["cnj"]}</div><div class="case-footer"><div><div class="label">ORIGEM</div><p class="case-location">{MAIN["court"]} · {MAIN["unit"]}</p></div><a class="btn" href="/processos/{MAIN["cnj"]}?tab=resumo">Ver detalhes do caso</a></div></div>
+<div class="proc section"><div class="chips"><span class="chip">JUSTIÇA ESTADUAL</span><span class="chip amber">{NEW_CASE["operational_status"].upper()}</span><span class="chip">VALIDAÇÃO HUMANA</span></div><h2 class="case-title">{NEW_CASE["title"]}</h2><div class="cnj">{NEW_CASE["cnj"]}</div><div class="case-footer"><div><div class="label">ORIGEM</div><p class="case-location">{NEW_CASE["court"]} · {NEW_CASE["unit"]}</p></div><a class="btn" href="/processos/{NEW_CASE["cnj"]}?tab=resumo">Ver detalhes do caso</a></div></div>
+<div class="actions"><form method="post" action="/sair"><button>Sair</button></form></div></section>""")
 
 @app.get("/processos/{cnj}",response_class=HTMLResponse)
 def detalhe(cnj:str,request:Request,tab:str="resumo"):
     if not auth(request): return RedirectResponse("/",303)
-    if cnj not in (MAIN["cnj"],RELATED["cnj"]):
+    if cnj not in (MAIN["cnj"],RELATED["cnj"],NEW_CASE["cnj"]):
         return page('<section class="card"><h1>Processo não encontrado</h1><a class="btn" href="/processos">Voltar</a></section>')
     valid={"resumo","movimentacoes","documentos","relacionados","prazos","partes","validacao","historico"}
     if tab not in valid: tab="resumo"
+    if cnj==NEW_CASE["cnj"]:
+        validation_label=new_case_validation_status()[0]
+        body=f"""<section class="card"><div class="top"><div><div class="brand">PORTICALLY HUB · PROCESSOS</div><h1>{NEW_CASE["title"]}</h1><div class="chips"><span class="chip">CÍVEL</span><span class="chip amber">{NEW_CASE["operational_status"].upper()}</span><span class="chip">{validation_label.upper()}</span></div></div><div class="chips"><span class="chip green">v{APP_VERSION}</span><span class="chip">{UPDATE_LABEL}</span></div></div>
+{main_nav()}
+{tabs(tab,NEW_CASE["cnj"])}{new_case_tab_content(tab)}
+<div class="section"><h2>Controle de integridade</h2><div class="grid"><div class="box"><div class="label">Fonte</div><div class="value">{NEW_CASE["source"]}</div></div><div class="box"><div class="label">Correspondência CNJ</div><div class="value">Exata no PDF recebido</div></div><div class="box"><div class="label">Documento</div><div class="value">ID oficial + link + SHA-256</div></div><div class="box"><div class="label">Status técnico</div><div class="value">{validation_label}</div></div></div></div>
+<div class="actions"><a class="btn" href="/painel">Voltar ao painel principal</a><a class="btn" href="/processos">Ver todos os processos</a><form method="post" action="/sair"><button>Sair</button></form></div></section>"""
+        return page(body,f"Processo {NEW_CASE['cnj']}")
     body=f"""<section class="card"><div class="top"><div><div class="brand">PORTICALLY HUB · PROCESSOS</div><h1>{TITLE}</h1><div class="chips"><span class="chip">TRABALHISTA</span><span class="chip amber">{MAIN["phase"].upper()}</span><span class="chip">1 PROCESSO VINCULADO</span></div></div><div class="chips"><span class="chip green">v{APP_VERSION}</span><span class="chip">{UPDATE_LABEL}</span></div></div>
 {main_nav()}
 {tabs(tab)}{tab_content(tab)}
@@ -681,8 +869,38 @@ def salvar_validacao(cnj:str,request:Request,
     cnj_ok:str=Form(None,alias="cnj"),
     tribunal:str=Form(None),partes:str=Form(None),vinculo:str=Form(None),
     documento:str=Form(None),prazo:str=Form(None),
-    data_ciencia:str=Form(""),observacoes:str=Form("")):
+    data_ciencia:str=Form(""),observacoes:str=Form(""),
+    metadata:str=Form(None),decision:str=Form(None),status_ok:str=Form(None,alias="status"),
+    next_steps:str=Form(None),document_link:str=Form(None)):
     if not auth(request): return RedirectResponse("/",303)
+    if cnj==NEW_CASE["cnj"]:
+        now=datetime.now(timezone.utc)
+        state={"metadata":bool(metadata),"decision":bool(decision),"status":bool(status_ok),
+               "next_steps":bool(next_steps),"document_link":bool(document_link),
+               "observacoes":observacoes.strip().upper(),"validated_at":now.astimezone(timezone(timedelta(hours=-3))).strftime("%d/%m/%Y às %H:%M"),
+               "validated_by":AUTHORIZED_EMAIL}
+        NEW_CASE_VALIDATION.update(state)
+        if db_ready():
+            with db_conn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""INSERT INTO process_validations(
+                        process_cnj,metadata_ok,decision_ok,status_ok,next_steps_ok,document_link_ok,
+                        notes,validated_at,validated_by,updated_at
+                    ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW())
+                    ON CONFLICT (process_cnj) DO UPDATE SET
+                        metadata_ok=EXCLUDED.metadata_ok,decision_ok=EXCLUDED.decision_ok,
+                        status_ok=EXCLUDED.status_ok,next_steps_ok=EXCLUDED.next_steps_ok,
+                        document_link_ok=EXCLUDED.document_link_ok,notes=EXCLUDED.notes,
+                        validated_at=EXCLUDED.validated_at,validated_by=EXCLUDED.validated_by,updated_at=NOW()""",
+                        (cnj,state["metadata"],state["decision"],state["status"],state["next_steps"],
+                         state["document_link"],state["observacoes"],now,AUTHORIZED_EMAIL))
+                    final_status=new_case_validation_status(state)[0]
+                    cur.execute("UPDATE process_records SET human_validation_status=%s,updated_at=NOW() WHERE cnj=%s",
+                                (final_status,cnj))
+                    cur.execute("UPDATE process_documents SET validation_status=%s,updated_at=NOW() WHERE process_cnj=%s",
+                                ("Vínculo validado manualmente" if state["document_link"] else "Aguardando validação humana",cnj))
+            audit("VALIDATE","process",cnj,f"{new_case_validation_status(state)[1]}/5 itens confirmados")
+        return RedirectResponse(f"/processos/{cnj}?tab=validacao",303)
     if cnj!=MAIN["cnj"]: return RedirectResponse("/processos",303)
     VALIDATION["cnj"]=bool(cnj_ok)
     VALIDATION["tribunal"]=bool(tribunal)

@@ -1,0 +1,77 @@
+name: Health readiness V1
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  health:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: health_test
+          POSTGRES_PASSWORD: synthetic_test_only
+          POSTGRES_DB: health_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      TEST_HEALTH_DATABASE_URL: postgresql://health_test:synthetic_test_only@localhost:5432/health_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt httpx
+      - run: python -m unittest discover -s tests -p 'test_health_V1.py' -v
+  compatibility:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - version: V21
+            ref: 74314828f85565752866c8a05e5b32607f3c8b06
+            suite: tests/test_otp.py
+          - version: V22
+            ref: 9c3c5fe59a6e0f030d1f02ef2168c2b212ca630a
+            suite: tests/test_case_privacy_V1.py
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: health_test
+          POSTGRES_PASSWORD: synthetic_test_only
+          POSTGRES_DB: health_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      TEST_HEALTH_DATABASE_URL: postgresql://health_test:synthetic_test_only@localhost:5432/health_test
+      TEST_DATABASE_URL: postgresql://health_test:synthetic_test_only@localhost:5432/health_test
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: probe
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.ref }}
+          path: deployed
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r deployed/requirements.txt httpx pytest
+      - name: Add only the new probe entry point to the pinned version
+        run: |
+          cp probe/health_app_V1.py deployed/health_app_V1.py
+          cp probe/health_checks_V1.py deployed/health_checks_V1.py
+          cp probe/tests/test_health_V1.py deployed/tests/test_health_V1.py
+      - run: python -m unittest discover -s tests -p 'test_health_V1.py' -v
+        working-directory: deployed
+      - run: python -m pytest -q ${{ matrix.suite }}
+        working-directory: deployed

@@ -1,4 +1,8 @@
 __pycache__/
 *.py[cod]
 .env
+.env.*
 .venv/
+private/
+*private*.json
+*.case.json

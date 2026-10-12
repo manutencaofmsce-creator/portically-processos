@@ -1,37 +1,26 @@
-# Portically Processos
+# Portically Processos — V23
 
-Aplicação privada em FastAPI para acompanhamento processual, autenticação por OTP e persistência em PostgreSQL.
+Cadastro individual pelo painel, lista dinâmica PostgreSQL e armazenamento criptografado, integrando a autenticação V21 e os bundles protegidos V22. PR independente baseado na main, sem implantação automática.
 
-## Atualização 21 · v1.4.0
+- `GET /processos`: lista persistida; `GET/POST /processos/novo`: ficha individual.
+- Número CNJ com verificação de dígitos; título, tribunal, fonte e data da coleta obrigatórios. Unidade, classe, partes, situação, resumo e link HTTPS opcionais.
+- Todos os campos começam pendentes de validação humana. Desmarcar exige conferência do operador; campos vazios permanecem pendentes.
+- Fichas, documentos importados, validações e eventos novos são cifrados com Fernet. CNJ usa índice HMAC para recusar duplicatas, sem sobrescrever.
+- Sessão exclusiva de `AUTHORIZED_EMAIL`, CSRF vinculado à sessão, escape de HTML, auditoria atômica e controle de revisão ao validar.
+- Sem consulta automática ao DataJud/PJe ou upload de novos PDFs nesta versão.
 
-- Inclui o processo `0800534-37.2025.8.20.5001` sem substituir o caso já existente.
-- Registra somente dados presentes na decisão de 29/09/2026.
-- Mantém o status interno separado do andamento oficial do PJe.
-- Exibe próximos passos sem calcular vencimento quando a data de ciência não está disponível.
-- Cataloga a decisão pelo ID oficial, fonte, link e SHA-256 do PDF recebido.
-- Persiste ficha, documento e validação humana em tabelas PostgreSQL aditivas.
-- Não publica o PDF judicial no repositório público.
+Leia [Operação e importação V1](docs/Cadastro_Processos_V1.md) **antes de trocar a versão**. Os registros anteriores precisam ser importados pelo operador; nenhuma migração de produção foi executada por este PR.
 
-## Banco de dados
-
-Na inicialização, a aplicação mantém as tabelas existentes e cria, apenas se necessário:
-
-- `process_records`
-- `process_documents`
-- `process_validations`
-
-O cadastro do novo processo é idempotente. O estado de validação humana não é sobrescrito durante uma nova implantação.
-
-## Executar testes
-
-```bash
-python -m unittest discover -v
+```sh
+pip install -r requirements.txt
+uvicorn app:app --host 0.0.0.0 --port 10000 --workers 1
 ```
 
-## Executar localmente
+Testes utilizam dados exclusivamente fictícios:
 
-```bash
-uvicorn app:app --reload
+```sh
+pip install -r requirements-test.txt
+python -m pytest -q
 ```
 
-As variáveis de ambiente usadas em produção continuam sendo `AUTHORIZED_EMAIL`, `SESSION_SECRET`, `RESEND_API_KEY`, `RESEND_FROM_EMAIL`, `DATABASE_URL`, `DATA_ENCRYPTION_KEY` e `DATA_HMAC_KEY`.
+`TEST_DATABASE_URL` deve apontar para um PostgreSQL isolado e descartável para os testes de integração.

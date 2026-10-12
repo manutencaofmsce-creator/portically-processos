@@ -9,7 +9,7 @@ from starlette.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse, RedirectResponse, PlainTextResponse
 from otp_auth import OTPAuth
 
-APP_VERSION="1.3.3"
+APP_VERSION="1.4.1"
 UPDATE_LABEL="Atualização 23 · V23"
 AUTHORIZED_EMAIL=os.environ.get("AUTHORIZED_EMAIL","").strip().lower()
 SESSION_SECRET=os.environ.get("SESSION_SECRET","")
